@@ -4,10 +4,12 @@
 
 part of wasm_builder.module;
 
-abstract class ValueType implements Serializable {
-  const ValueType();
+abstract class StorageType implements Serializable {
+  bool isSubtypeOf(StorageType other);
+}
 
-  bool isSubtypeOf(ValueType other);
+abstract class ValueType implements StorageType {
+  const ValueType();
 }
 
 enum NumTypeKind { i32, i64, f32, f64, v128 }
@@ -15,16 +17,16 @@ enum NumTypeKind { i32, i64, f32, f64, v128 }
 class NumType extends ValueType {
   final NumTypeKind kind;
 
-  const NumType._of(this.kind);
+  const NumType._(this.kind);
 
-  static const i32 = NumType._of(NumTypeKind.i32);
-  static const i64 = NumType._of(NumTypeKind.i64);
-  static const f32 = NumType._of(NumTypeKind.f32);
-  static const f64 = NumType._of(NumTypeKind.f64);
-  static const v128 = NumType._of(NumTypeKind.v128);
+  static const i32 = NumType._(NumTypeKind.i32);
+  static const i64 = NumType._(NumTypeKind.i64);
+  static const f32 = NumType._(NumTypeKind.f32);
+  static const f64 = NumType._(NumTypeKind.f64);
+  static const v128 = NumType._(NumTypeKind.v128);
 
   @override
-  bool isSubtypeOf(ValueType other) => this == other;
+  bool isSubtypeOf(StorageType other) => this == other;
 
   @override
   void serialize(Serializer s) {
@@ -64,6 +66,81 @@ class NumType extends ValueType {
   }
 }
 
+class Rtt extends ValueType {
+  final HeapType heapType;
+  final int depth;
+
+  const Rtt(this.heapType, this.depth);
+
+  @override
+  bool isSubtypeOf(StorageType other) => this == other;
+
+  @override
+  void serialize(Serializer s) {
+    s.writeByte(0x69);
+    s.writeUnsigned(depth);
+    s.write(heapType);
+  }
+
+  @override
+  String toString() => "rtt $depth $heapType";
+
+  @override
+  bool operator ==(Object other) =>
+      other is Rtt && other.heapType == heapType && other.depth == depth;
+
+  @override
+  int get hashCode => heapType.hashCode * (3 + depth * 2);
+}
+
+class RefType extends ValueType {
+  final HeapType heapType;
+  final bool nullable;
+
+  RefType._(this.heapType, bool? nullable)
+      : this.nullable = nullable ??
+            heapType.defaultNullability ??
+            (throw "Unspecified nullability");
+
+  RefType.any({bool? nullable}) : this._(HeapType.any, nullable);
+  RefType.eq({bool? nullable}) : this._(HeapType.eq, nullable);
+  RefType.i31({bool? nullable}) : this._(HeapType.i31, nullable);
+  RefType.func({bool? nullable}) : this._(HeapType.func, nullable);
+  RefType.extern({bool? nullable}) : this._(HeapType.extern, nullable);
+  RefType.def(DefType defType, {required bool nullable})
+      : this._(HeapType.def(defType), nullable);
+
+  @override
+  bool isSubtypeOf(StorageType other) {
+    if (other is! RefType) return false;
+    if (!nullable && other.nullable) return false;
+    return heapType.isSubtypeOf(other.heapType);
+  }
+
+  @override
+  void serialize(Serializer s) {
+    if (nullable != heapType.defaultNullability) {
+      s.writeByte(nullable ? 0x6C : 0x6B);
+    }
+    s.write(heapType);
+  }
+
+  @override
+  String toString() {
+    if (nullable == heapType.defaultNullability) return "${heapType}ref";
+    return "ref${nullable ? " null " : " "}${heapType}";
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is RefType &&
+      other.heapType == heapType &&
+      other.nullable == nullable;
+
+  @override
+  int get hashCode => heapType.hashCode * (nullable ? -1 : 1);
+}
+
 abstract class HeapType implements Serializable {
   const HeapType();
 
@@ -86,7 +163,7 @@ class AnyHeapType extends HeapType {
   bool isSubtypeOf(HeapType other) => other == HeapType.any;
 
   @override
-  void serialize(Serializer s) => s.writeSigned(-0x12);
+  void serialize(Serializer s) => s.writeByte(0x6E);
 
   @override
   String toString() => "any";
@@ -100,10 +177,55 @@ class EqHeapType extends HeapType {
       other == HeapType.any || other == HeapType.eq;
 
   @override
-  void serialize(Serializer s) => s.writeSigned(-0x13);
+  void serialize(Serializer s) => s.writeByte(0x6D);
 
   @override
   String toString() => "eq";
+}
+
+class I31HeapType extends HeapType {
+  const I31HeapType._();
+
+  @override
+  bool? get defaultNullability => false;
+
+  @override
+  bool isSubtypeOf(HeapType other) =>
+      other == HeapType.any || other == HeapType.eq || other == HeapType.i31;
+
+  @override
+  void serialize(Serializer s) => s.writeByte(0x6A);
+
+  @override
+  String toString() => "i31";
+}
+
+class FuncHeapType extends HeapType {
+  const FuncHeapType._();
+
+  @override
+  bool isSubtypeOf(HeapType other) =>
+      other == HeapType.any || other == HeapType.func;
+
+  @override
+  void serialize(Serializer s) => s.writeByte(0x70);
+
+  @override
+  String toString() => "func";
+}
+
+class ExternHeapType extends HeapType {
+  const ExternHeapType._();
+
+  @override
+  bool isSubtypeOf(HeapType other) =>
+      other == HeapType.any || other == HeapType.extern;
+
+  @override
+  void serialize(Serializer s) => s.writeByte(0x6F);
+
+  @override
+  String toString() => "extern";
 }
 
 class DefHeapType extends HeapType {
@@ -133,126 +255,6 @@ class DefHeapType extends HeapType {
   String toString() => def.toString();
 }
 
-class I31HeapType extends HeapType {
-  const I31HeapType._();
-
-  @override
-  bool? get defaultNullability => false;
-
-  @override
-  bool isSubtypeOf(HeapType other) =>
-      other == HeapType.any || other == HeapType.eq || other == HeapType.i31;
-
-  @override
-  void serialize(Serializer s) => s.writeSigned(-0x16);
-
-  @override
-  String toString() => "i31";
-}
-
-class FuncHeapType extends HeapType {
-  const FuncHeapType._();
-
-  @override
-  bool isSubtypeOf(HeapType other) =>
-      other == HeapType.any || other == HeapType.func;
-
-  @override
-  void serialize(Serializer s) => s.writeSigned(-0x10);
-
-  @override
-  String toString() => "func";
-}
-
-class ExternHeapType extends HeapType {
-  const ExternHeapType._();
-
-  @override
-  bool isSubtypeOf(HeapType other) =>
-      other == HeapType.any || other == HeapType.extern;
-
-  @override
-  void serialize(Serializer s) => s.writeSigned(-0x11);
-
-  @override
-  String toString() => "extern";
-}
-
-class RefType extends ValueType {
-  final HeapType heapType;
-  final bool nullable;
-
-  RefType._(this.heapType, bool? nullable)
-      : nullable = nullable ??
-            heapType.defaultNullability ??
-            (throw "Unspecified nullability");
-
-  RefType.any({bool? nullable}) : this._(HeapType.any, nullable);
-  RefType.eq({bool? nullable}) : this._(HeapType.eq, nullable);
-  RefType.i31({bool? nullable}) : this._(HeapType.i31, nullable);
-  RefType.func({bool? nullable}) : this._(HeapType.func, nullable);
-  RefType.extern({bool? nullable}) : this._(HeapType.extern, nullable);
-  RefType.def(DefType defType, {required bool nullable})
-      : this._(HeapType.def(defType), nullable);
-
-  @override
-  bool isSubtypeOf(ValueType other) {
-    if (other is! RefType) return false;
-    if (!nullable && other.nullable) return false;
-    return heapType.isSubtypeOf(other.heapType);
-  }
-
-  @override
-  void serialize(Serializer s) {
-    if (nullable != heapType.defaultNullability) {
-      s.writeSigned(nullable ? -0x14 : -0x15);
-    }
-    s.write(heapType);
-  }
-
-  @override
-  String toString() {
-    if (nullable == heapType.defaultNullability) return "${heapType}ref";
-    return "ref${nullable ? " null " : " "}${heapType}";
-  }
-
-  @override
-  bool operator ==(Object other) =>
-      other is RefType &&
-      other.heapType == heapType &&
-      other.nullable == nullable;
-
-  @override
-  int get hashCode => heapType.hashCode * (nullable ? -1 : 1);
-}
-
-class Rtt extends ValueType {
-  final HeapType heapType;
-  final int depth;
-
-  Rtt(this.heapType, this.depth);
-
-  @override
-  bool isSubtypeOf(ValueType other) => this == other;
-
-  @override
-  void serialize(Serializer s) {
-    s.writeSigned(-0x17);
-    s.writeUnsigned(depth);
-    s.write(heapType);
-  }
-
-  @override
-  String toString() => "rtt $depth $heapType";
-
-  @override
-  bool operator ==(Object other) =>
-      other is Rtt && other.heapType == heapType && other.depth == depth;
-
-  @override
-  int get hashCode => heapType.hashCode * (3 + depth * 2);
-}
-
 abstract class DefType implements Serializable {
   int index;
 
@@ -267,14 +269,17 @@ class FunctionType extends DefType {
 
   FunctionType._(int index, this.inputs, this.outputs) : super._(index);
 
+  @override
   bool isSubtypeOf(DefType other) {
     if (other is! FunctionType) return false;
     if (inputs.length != other.inputs.length) return false;
     if (outputs.length != other.outputs.length) return false;
     for (int i = 0; i < inputs.length; i++) {
+      // Inputs are contravariant.
       if (!other.inputs[i].isSubtypeOf(inputs[i])) return false;
     }
     for (int i = 0; i < outputs.length; i++) {
+      // Outputs are covariant.
       if (!outputs[i].isSubtypeOf(other.outputs[i])) return false;
     }
     return true;
@@ -297,18 +302,19 @@ class StructType extends DefType {
 
   StructType._(int index, this.name) : super._(index);
 
+  @override
   bool isSubtypeOf(DefType other) {
     if (other is! StructType) return false;
     if (fields.length < other.fields.length) return false;
     for (int i = 0; i < other.fields.length; i++) {
-      if (fields[i] != other.fields[i]) return false;
+      if (!fields[i].isSubtypeOf(other.fields[i])) return false;
     }
     return true;
   }
 
   @override
   void serialize(Serializer s) {
-    s.writeByte(0x5E);
+    s.writeByte(0x5F);
     s.writeList(fields);
   }
 
@@ -322,8 +328,9 @@ class ArrayType extends DefType {
 
   ArrayType._(int index, this.name) : super._(index);
 
+  @override
   bool isSubtypeOf(DefType other) =>
-      other is ArrayType && elementType == other.elementType;
+      other is ArrayType && elementType.isSubtypeOf(other.elementType);
 
   @override
   void serialize(Serializer s) {
@@ -335,78 +342,68 @@ class ArrayType extends DefType {
   String toString() => name;
 }
 
-abstract class FieldType implements Serializable {
-  bool mutable;
+class FieldType implements Serializable {
+  final StorageType type;
+  final bool mutable;
 
-  FieldType._(this.mutable);
+  FieldType(this.type, {this.mutable = true});
 
-  factory FieldType.i8({bool mutable: true}) =>
-      PackedFieldType._(PackedType.i8, mutable);
-  factory FieldType.i16({bool mutable: true}) =>
-      PackedFieldType._(PackedType.i8, mutable);
-  factory FieldType(ValueType valueType, {bool mutable: true}) =>
-      ValueFieldType._(valueType, mutable);
+  FieldType.i8({bool mutable: true}) : this(PackedType.i8, mutable: mutable);
+  FieldType.i16({bool mutable: true}) : this(PackedType.i16, mutable: mutable);
 
-  String toString() => "${_toStringInner()}${mutable ? " mut" : ""}";
-  String _toStringInner();
-}
-
-enum PackedType { i8, i16 }
-
-class PackedFieldType extends FieldType {
-  PackedType packedType;
-
-  PackedFieldType._(this.packedType, bool mutable) : super._(mutable);
+  bool isSubtypeOf(FieldType other) {
+    if (mutable != other.mutable) return false;
+    if (mutable) {
+      // Mutable fields are invariant.
+      return type == other.type;
+    } else {
+      // Immutable fields are covariant.
+      return type.isSubtypeOf(other.type);
+    }
+  }
 
   @override
   void serialize(Serializer s) {
-    switch (packedType) {
-      case PackedType.i8:
+    s.write(type);
+    s.writeByte(mutable ? 0x01 : 0x00);
+  }
+
+  @override
+  String toString() => "${mutable ? "var " : "const "}$type";
+}
+
+enum PackedTypeKind { i8, i16 }
+
+class PackedType implements StorageType {
+  final PackedTypeKind kind;
+
+  const PackedType._(this.kind);
+
+  static const i8 = PackedType._(PackedTypeKind.i8);
+  static const i16 = PackedType._(PackedTypeKind.i16);
+
+  @override
+  bool isSubtypeOf(StorageType other) => this == other;
+
+  @override
+  void serialize(Serializer s) {
+    switch (kind) {
+      case PackedTypeKind.i8:
         s.writeByte(0x7A);
         break;
-      case PackedType.i16:
+      case PackedTypeKind.i16:
         s.writeByte(0x79);
         break;
     }
-    s.writeByte(mutable ? 0x01 : 0x00);
   }
 
   @override
-  String _toStringInner() {
-    switch (packedType) {
-      case PackedType.i8:
+  String toString() {
+    switch (kind) {
+      case PackedTypeKind.i8:
         return "i8";
-      case PackedType.i16:
+      case PackedTypeKind.i16:
         return "i16";
     }
   }
-
-  @override
-  bool operator ==(Object other) =>
-      other is PackedFieldType && other.packedType == packedType;
-
-  @override
-  int get hashCode => packedType.hashCode;
-}
-
-class ValueFieldType extends FieldType {
-  ValueType valueType;
-
-  ValueFieldType._(this.valueType, bool mutable) : super._(mutable);
-
-  @override
-  void serialize(Serializer s) {
-    s.write(valueType);
-    s.writeByte(mutable ? 0x01 : 0x00);
-  }
-
-  @override
-  String _toStringInner() => valueType.toString();
-
-  @override
-  bool operator ==(Object other) =>
-      other is ValueFieldType && other.valueType == valueType;
-
-  @override
-  int get hashCode => valueType.hashCode;
 }

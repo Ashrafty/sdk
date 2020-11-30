@@ -15,27 +15,25 @@ class Module {
 
   FunctionType makeFunctionType(
       Iterable<ValueType> inputs, Iterable<ValueType> outputs) {
-    List<ValueType> inputList = List.unmodifiable(inputs);
-    List<ValueType> outputList = List.unmodifiable(outputs);
-    _FunctionTypeKey key = _FunctionTypeKey(inputList, outputList);
+    final List<ValueType> inputList = List.unmodifiable(inputs);
+    final List<ValueType> outputList = List.unmodifiable(outputs);
+    final _FunctionTypeKey key = _FunctionTypeKey(inputList, outputList);
     return functionTypeMap.putIfAbsent(key, () {
-      var type = FunctionType._(defTypes.length, inputList, outputList);
+      final type = FunctionType._(defTypes.length, inputList, outputList);
       defTypes.add(type);
       return type;
     });
   }
 
-  StructType makeStructType(String name, [Iterable<FieldType>? fieldTypes]) {
-    var type = StructType._(defTypes.length, name);
-    if (fieldTypes != null) {
-      for (var fieldType in fieldTypes) type.fields.add(fieldType);
-    }
+  StructType makeStructType(String name, [Iterable<FieldType>? fields]) {
+    final type = StructType._(defTypes.length, name);
+    if (fields != null) type.fields.addAll(fields);
     defTypes.add(type);
     return type;
   }
 
   ArrayType makeArrayType(String name, [FieldType? elementType]) {
-    var type = ArrayType._(defTypes.length, name);
+    final type = ArrayType._(defTypes.length, name);
     if (elementType != null) type.elementType = elementType;
     defTypes.add(type);
     return type;
