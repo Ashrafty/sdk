@@ -2,15 +2,17 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library wasm_builder.serialize;
-
+import 'dart:convert';
 import 'dart:typed_data';
 
 abstract class Serializer {
   void writeByte(int byte);
-  void writeBytes(Uint8List bytes);
+  void writeBytes(List<int> bytes);
   void writeSigned(int value);
   void writeUnsigned(int value);
+  void writeF32(double value);
+  void writeF64(double value);
+  void writeName(String name);
   void write(Serializable object);
   void writeList(List<Serializable> objects);
 }
@@ -37,7 +39,7 @@ mixin SerializerMixin implements Serializer {
     _data[_index++] = byte;
   }
 
-  void writeBytes(Uint8List bytes) {
+  void writeBytes(List<int> bytes) {
     _ensure(bytes.length);
     _data.setRange(_index, _index += bytes.length, bytes);
   }
@@ -57,6 +59,26 @@ mixin SerializerMixin implements Serializer {
       value >>= 7;
     }
     writeByte(value);
+  }
+
+  void writeF32(double value) {
+    List<int> bytes = Float32List.fromList([value]).buffer.asUint8List();
+    assert(bytes.length == 4);
+    if (Endian.host == Endian.big) bytes = bytes.reversed.toList();
+    writeBytes(bytes);
+  }
+
+  void writeF64(double value) {
+    List<int> bytes = Float64List.fromList([value]).buffer.asUint8List();
+    assert(bytes.length == 8);
+    if (Endian.host == Endian.big) bytes = bytes.reversed.toList();
+    writeBytes(bytes);
+  }
+
+  void writeName(String name) {
+    List<int> bytes = utf8.encode(name);
+    writeUnsigned(bytes.length);
+    writeBytes(bytes);
   }
 
   void write(Serializable object) {

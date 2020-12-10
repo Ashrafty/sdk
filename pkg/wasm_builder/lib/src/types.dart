@@ -2,7 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-part of wasm_builder.module;
+import 'serialize.dart';
 
 abstract class StorageType implements Serializable {
   bool isSubtypeOf(StorageType other);
@@ -256,9 +256,10 @@ class DefHeapType extends HeapType {
 }
 
 abstract class DefType implements Serializable {
-  int index;
+  int? _index;
 
-  DefType._(this.index);
+  int get index => _index ?? (throw "$runtimeType $this not added to module");
+  set index(int i) => _index = i;
 
   bool isSubtypeOf(DefType other);
 }
@@ -267,7 +268,7 @@ class FunctionType extends DefType {
   final List<ValueType> inputs;
   final List<ValueType> outputs;
 
-  FunctionType._(int index, this.inputs, this.outputs) : super._(index);
+  FunctionType(this.inputs, this.outputs);
 
   @override
   bool isSubtypeOf(DefType other) {
@@ -300,7 +301,7 @@ class StructType extends DefType {
   final String name;
   final List<FieldType> fields = [];
 
-  StructType._(int index, this.name) : super._(index);
+  StructType(this.name);
 
   @override
   bool isSubtypeOf(DefType other) {
@@ -326,7 +327,7 @@ class ArrayType extends DefType {
   final String name;
   late final FieldType elementType;
 
-  ArrayType._(int index, this.name) : super._(index);
+  ArrayType(this.name);
 
   @override
   bool isSubtypeOf(DefType other) =>
