@@ -51,14 +51,14 @@ class Module with SerializerMixin {
 
   DefinedFunction addFunction(FunctionType type) {
     anyFunctionsDefined = true;
-    final function = DefinedFunction(functions.length, type);
+    final function = DefinedFunction(this, functions.length, type);
     functions.add(function);
     return function;
   }
 
   DefinedGlobal addGlobal(FieldType type) {
     anyGlobalsDefined = true;
-    final global = DefinedGlobal(functions.length, type);
+    final global = DefinedGlobal(this, functions.length, type);
     globals.add(global);
     return global;
   }

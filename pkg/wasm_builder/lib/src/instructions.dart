@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'module.dart';
 import 'serialize.dart';
 import 'types.dart';
 
@@ -18,11 +19,12 @@ class DefinedFunction extends Function
   final List<Local> locals = [];
   late final Instructions body;
 
-  DefinedFunction(int index, FunctionType type) : super(index, type) {
+  DefinedFunction(Module module, int index, FunctionType type)
+      : super(index, type) {
     for (ValueType paramType in type.inputs) {
       addLocal(paramType);
     }
-    body = Instructions(this);
+    body = Instructions(module, type.outputs, locals);
   }
 
   Local addLocal(ValueType type) {
@@ -72,12 +74,15 @@ abstract class Global {
 }
 
 class DefinedGlobal extends Global implements Serializable {
-  final Instructions initializer = Instructions();
+  final Instructions initializer;
 
-  DefinedGlobal(int index, FieldType type) : super(index, type);
+  DefinedGlobal(Module module, int index, FieldType type)
+      : initializer = Instructions(module, [type.type as ValueType]),
+        super(index, type);
 
   @override
   void serialize(Serializer s) {
+    assert(initializer.isComplete);
     s.write(type);
     s.writeBytes(initializer.data);
   }
@@ -85,34 +90,54 @@ class DefinedGlobal extends Global implements Serializable {
 
 abstract class Label {
   late final int depth;
-  final FunctionType type;
+  final List<ValueType> inputs;
+  final List<ValueType> outputs;
 
-  Label._(this.type);
+  Label._(this.inputs, this.outputs);
+
+  List<ValueType> get targetTypes;
 }
 
 class Expression extends Label {
-  Expression(FunctionType type) : super._(type);
+  Expression(List<ValueType> inputs, List<ValueType> outputs)
+      : super._(inputs, outputs) {
+    depth = 0;
+  }
+
+  List<ValueType> get targetTypes => outputs;
 }
 
 class Block extends Label {
-  Block(FunctionType type) : super._(type);
+  Block(List<ValueType> inputs, List<ValueType> outputs)
+      : super._(inputs, outputs);
+
+  List<ValueType> get targetTypes => outputs;
 }
 
 class Loop extends Label {
-  Loop(FunctionType type) : super._(type);
+  Loop(List<ValueType> inputs, List<ValueType> outputs)
+      : super._(inputs, outputs);
+
+  List<ValueType> get targetTypes => inputs;
 }
 
 class If extends Label {
-  If(FunctionType type) : super._(type);
+  If(List<ValueType> inputs, List<ValueType> outputs)
+      : super._(inputs, outputs);
+
+  List<ValueType> get targetTypes => outputs;
 }
 
 class Instructions with SerializerMixin {
-  final DefinedFunction? function;
+  final Module module;
+  final List<Local> locals;
   final List<Label> labelStack = [];
 
-  Instructions([this.function]);
+  Instructions(this.module, List<ValueType> outputs, [this.locals = const []]) {
+    labelStack.add(Expression(const [], outputs));
+  }
 
-  bool get isComplete => data.isNotEmpty && labelStack.isEmpty;
+  bool get isComplete => labelStack.isEmpty;
 
   // Control instructions
 
@@ -124,34 +149,41 @@ class Instructions with SerializerMixin {
     writeByte(0x01);
   }
 
-  Label expression(FunctionType type) {
-    assert(data.isEmpty);
-    assert(labelStack.isEmpty);
-    Label label = Expression(type)..depth = 0;
-    labelStack.add(label);
-    return label;
-  }
-
   Label _beginBlock(int encoding, Label label) {
     label.depth = labelStack.length;
     labelStack.add(label);
     writeByte(encoding);
-    writeSigned(label.type.index);
+    if (label.inputs.isEmpty && label.outputs.isEmpty) {
+      writeByte(0x40);
+    } else if (label.inputs.isEmpty && label.outputs.length == 1) {
+      write(label.outputs.single);
+    } else {
+      FunctionType type = module.addFunctionType(label.inputs, label.outputs);
+      writeSigned(type.index);
+    }
     return label;
   }
 
-  Label block(FunctionType type) => _beginBlock(0x02, Block(type));
-  Label loop(FunctionType type) => _beginBlock(0x03, Loop(type));
-  Label if_(FunctionType type) => _beginBlock(0x04, If(type));
+  Label block(
+          [List<ValueType> inputs = const [],
+          List<ValueType> outputs = const []]) =>
+      _beginBlock(0x02, Block(inputs, outputs));
+  Label loop(
+          [List<ValueType> inputs = const [],
+          List<ValueType> outputs = const []]) =>
+      _beginBlock(0x03, Loop(inputs, outputs));
+  Label if_(
+          [List<ValueType> inputs = const [],
+          List<ValueType> outputs = const []]) =>
+      _beginBlock(0x04, If(inputs, outputs));
 
   void else_(Label label) {
     assert(label == labelStack.last);
     writeByte(0x05);
   }
 
-  void end(Label label) {
-    Label top = labelStack.removeLast();
-    assert(label == top);
+  void end() {
+    labelStack.removeLast();
     writeByte(0x0B);
   }
 
@@ -188,9 +220,9 @@ class Instructions with SerializerMixin {
     writeByte(0x0F);
   }
 
-  void call(Function fun) {
+  void call(Function function) {
     writeByte(0x10);
-    writeUnsigned(fun.index);
+    writeUnsigned(function.index);
   }
 
   void call_indirect(FunctionType type) {
@@ -212,19 +244,19 @@ class Instructions with SerializerMixin {
   // Variable instructions
 
   void local_get(Local local) {
-    assert(function!.locals[local.index] == local);
+    assert(locals[local.index] == local);
     writeByte(0x20);
     writeUnsigned(local.index);
   }
 
   void local_set(Local local) {
-    assert(function!.locals[local.index] == local);
+    assert(locals[local.index] == local);
     writeByte(0x21);
     writeUnsigned(local.index);
   }
 
   void local_tee(Local local) {
-    assert(function!.locals[local.index] == local);
+    assert(locals[local.index] == local);
     writeByte(0x22);
     writeUnsigned(local.index);
   }
@@ -241,6 +273,147 @@ class Instructions with SerializerMixin {
   }
 
   // TODO: memory instructions
+
+  // Reference instructions
+
+  void ref_null(HeapType type) {
+    writeByte(0xD0);
+    write(type);
+  }
+
+  void ref_is_null() {
+    writeByte(0xD1);
+  }
+
+  void ref_func(Function function) {
+    writeByte(0xD2);
+    writeUnsigned(function.index);
+  }
+
+  void ref_as_non_null() {
+    writeByte(0xD3);
+  }
+
+  void br_on_null(Label label) {
+    writeByte(0xD4);
+    _writeLabel(label);
+  }
+
+  void ref_eq() {
+    writeByte(0xD5);
+  }
+
+  void struct_new_with_rtt(ValueType structType) {
+    writeBytes(const [0xFB, 0x01]);
+    write(structType);
+  }
+
+  void struct_new_default_with_rtt(ValueType structType) {
+    writeBytes(const [0xFB, 0x02]);
+    write(structType);
+  }
+
+  void struct_get(ValueType structType, int fieldIndex) {
+    writeBytes(const [0xFB, 0x03]);
+    write(structType);
+    writeUnsigned(fieldIndex);
+  }
+
+  void struct_get_s(ValueType structType, int fieldIndex) {
+    writeBytes(const [0xFB, 0x04]);
+    write(structType);
+    writeUnsigned(fieldIndex);
+  }
+
+  void struct_get_u(ValueType structType, int fieldIndex) {
+    writeBytes(const [0xFB, 0x05]);
+    write(structType);
+    writeUnsigned(fieldIndex);
+  }
+
+  void struct_set(ValueType structType, int fieldIndex) {
+    writeBytes(const [0xFB, 0x06]);
+    write(structType);
+    writeUnsigned(fieldIndex);
+  }
+
+  void array_new_with_rtt(ValueType arrayType) {
+    writeBytes(const [0xFB, 0x11]);
+    write(arrayType);
+  }
+
+  void array_new_default_with_rtt(ValueType arrayType) {
+    writeBytes(const [0xFB, 0x12]);
+    write(arrayType);
+  }
+
+  void array_get(ValueType arrayType) {
+    writeBytes(const [0xFB, 0x13]);
+    write(arrayType);
+  }
+
+  void array_get_s(ValueType arrayType) {
+    writeBytes(const [0xFB, 0x14]);
+    write(arrayType);
+  }
+
+  void array_get_u(ValueType arrayType) {
+    writeBytes(const [0xFB, 0x15]);
+    write(arrayType);
+  }
+
+  void array_set(ValueType arrayType) {
+    writeBytes(const [0xFB, 0x16]);
+    write(arrayType);
+  }
+
+  void array_len(ValueType arrayType) {
+    writeBytes(const [0xFB, 0x17]);
+    write(arrayType);
+  }
+
+  void i31_new() {
+    writeBytes(const [0xFB, 0x20]);
+  }
+
+  void i31_get_s() {
+    writeBytes(const [0xFB, 0x21]);
+  }
+
+  void i31_get_u() {
+    writeBytes(const [0xFB, 0x22]);
+  }
+
+  void rtt_canon(HeapType type) {
+    writeBytes(const [0xFB, 0x30]);
+    write(type);
+  }
+
+  void rtt_sub(int depth, HeapType superType, HeapType subType) {
+    writeBytes(const [0xFB, 0x31]);
+    writeUnsigned(depth);
+    write(superType);
+    write(subType);
+  }
+
+  void ref_test(HeapType inputType, HeapType targetType) {
+    writeBytes(const [0xFB, 0x40]);
+    write(inputType);
+    write(targetType);
+  }
+
+  void ref_cast(HeapType inputType, HeapType targetType) {
+    writeBytes(const [0xFB, 0x41]);
+    write(inputType);
+    write(targetType);
+  }
+
+  void br_on_cast(Label label, HeapType inputType, HeapType targetType) {
+    writeBytes(const [0xFB, 0x42]);
+    _writeLabel(label);
+    write(inputType);
+    write(targetType);
+  }
 
   // Numeric instructions
 
@@ -778,42 +951,34 @@ class Instructions with SerializerMixin {
   }
 
   void i32_trunc_sat_f32_s() {
-    writeByte(0xFC);
-    writeByte(0x00);
+    writeBytes(const [0xFC, 0x00]);
   }
 
   void i32_trunc_sat_f32_u() {
-    writeByte(0xFC);
-    writeByte(0x01);
+    writeBytes(const [0xFC, 0x01]);
   }
 
   void i32_trunc_sat_f64_s() {
-    writeByte(0xFC);
-    writeByte(0x02);
+    writeBytes(const [0xFC, 0x02]);
   }
 
   void i32_trunc_sat_f64_u() {
-    writeByte(0xFC);
-    writeByte(0x03);
+    writeBytes(const [0xFC, 0x03]);
   }
 
   void i64_trunc_sat_f32_s() {
-    writeByte(0xFC);
-    writeByte(0x04);
+    writeBytes(const [0xFC, 0x04]);
   }
 
   void i64_trunc_sat_f32_u() {
-    writeByte(0xFC);
-    writeByte(0x05);
+    writeBytes(const [0xFC, 0x05]);
   }
 
   void i64_trunc_sat_f64_s() {
-    writeByte(0xFC);
-    writeByte(0x06);
+    writeBytes(const [0xFC, 0x06]);
   }
 
   void i64_trunc_sat_f64_u() {
-    writeByte(0xFC);
-    writeByte(0x07);
+    writeBytes(const [0xFC, 0x07]);
   }
 }
