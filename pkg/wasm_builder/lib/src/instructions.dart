@@ -5,13 +5,23 @@
 import 'serialize.dart';
 import 'types.dart';
 
-class Function with SerializerMixin implements Serializable {
+abstract class Function {
   int index;
   final FunctionType type;
+
+  Function(this.index, this.type);
+}
+
+class DefinedFunction extends Function
+    with SerializerMixin
+    implements Serializable {
   final List<Local> locals = [];
   late final Instructions body;
 
-  Function(this.index, this.type) {
+  DefinedFunction(int index, FunctionType type) : super(index, type) {
+    for (ValueType paramType in type.inputs) {
+      addLocal(paramType);
+    }
     body = Instructions(this);
   }
 
@@ -54,17 +64,22 @@ class Local {
   Local(this.index, this.type);
 }
 
-class Global implements Serializable {
+abstract class Global {
   final int index;
   final FieldType type;
-  final Instructions body = Instructions();
 
   Global(this.index, this.type);
+}
+
+class DefinedGlobal extends Global implements Serializable {
+  final Instructions initializer = Instructions();
+
+  DefinedGlobal(int index, FieldType type) : super(index, type);
 
   @override
   void serialize(Serializer s) {
     s.write(type);
-    s.writeBytes(body.data);
+    s.writeBytes(initializer.data);
   }
 }
 
@@ -92,7 +107,7 @@ class If extends Label {
 }
 
 class Instructions with SerializerMixin {
-  final Function? function;
+  final DefinedFunction? function;
   final List<Label> labelStack = [];
 
   Instructions([this.function]);

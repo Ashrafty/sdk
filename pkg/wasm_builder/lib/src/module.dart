@@ -17,6 +17,12 @@ class Module with SerializerMixin {
   List<Export> exports = [];
   Function? startFunction = null;
 
+  bool anyFunctionsDefined = false;
+  bool anyGlobalsDefined = false;
+
+  Iterable<Import> get imports =>
+      functions.whereType<Import>().followedBy(globals.whereType<Import>());
+
   FunctionType addFunctionType(
       Iterable<ValueType> inputs, Iterable<ValueType> outputs) {
     final List<ValueType> inputList = List.unmodifiable(inputs);
@@ -43,10 +49,37 @@ class Module with SerializerMixin {
     return type;
   }
 
-  Function addFunction(FunctionType type) {
-    final function = Function(functions.length, type);
+  DefinedFunction addFunction(FunctionType type) {
+    anyFunctionsDefined = true;
+    final function = DefinedFunction(functions.length, type);
     functions.add(function);
     return function;
+  }
+
+  DefinedGlobal addGlobal(FieldType type) {
+    anyGlobalsDefined = true;
+    final global = DefinedGlobal(functions.length, type);
+    globals.add(global);
+    return global;
+  }
+
+  ImportedFunction importFunction(
+      String module, String name, FunctionType type) {
+    if (anyFunctionsDefined) {
+      throw "All function imports must be specified before any definitions.";
+    }
+    final function = ImportedFunction(module, name, functions.length, type);
+    functions.add(function);
+    return function;
+  }
+
+  ImportedGlobal importGlobal(String module, String name, FieldType type) {
+    if (anyGlobalsDefined) {
+      throw "All global imports must be specified before any definitions.";
+    }
+    final global = ImportedGlobal(module, name, functions.length, type);
+    globals.add(global);
+    return global;
   }
 
   void exportFunction(String name, Function function) {
@@ -60,10 +93,11 @@ class Module with SerializerMixin {
   Uint8List encode() {
     writeBytes(const [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]);
     TypeSection(this).serialize(this);
+    ImportSection(this).serialize(this);
     FunctionSection(this).serialize(this);
     GlobalSection(this).serialize(this);
     ExportSection(this).serialize(this);
-    StartSection(this).serialize(this);
+    if (startFunction != null) StartSection(this).serialize(this);
     CodeSection(this).serialize(this);
     return data;
   }
@@ -100,6 +134,43 @@ class _FunctionTypeKey {
       outputHash = outputHash * 29 + output.hashCode;
     }
     return (inputHash * 2 + 1) * (outputHash * 2 + 1);
+  }
+}
+
+abstract class Import implements Serializable {
+  String get module;
+  String get name;
+}
+
+class ImportedFunction extends Function implements Import {
+  String module;
+  String name;
+
+  ImportedFunction(this.module, this.name, int index, FunctionType type)
+      : super(index, type);
+
+  @override
+  void serialize(Serializer s) {
+    s.writeName(module);
+    s.writeName(name);
+    s.writeByte(0x00);
+    s.writeUnsigned(type.index);
+  }
+}
+
+class ImportedGlobal extends Global implements Import {
+  String module;
+  String name;
+
+  ImportedGlobal(this.module, this.name, int index, FieldType type)
+      : super(index, type);
+
+  @override
+  void serialize(Serializer s) {
+    s.writeName(module);
+    s.writeName(name);
+    s.writeByte(0x03);
+    s.write(type);
   }
 }
 
@@ -164,6 +235,18 @@ class TypeSection extends Section {
   }
 }
 
+class ImportSection extends Section {
+  ImportSection(Module module) : super(module);
+
+  @override
+  int get id => 2;
+
+  @override
+  void serializeContents() {
+    writeList(module.imports.toList());
+  }
+}
+
 class FunctionSection extends Section {
   FunctionSection(Module module) : super(module);
 
@@ -172,7 +255,10 @@ class FunctionSection extends Section {
 
   @override
   void serializeContents() {
-    writeList(module.functions.map((f) => f.type).toList());
+    writeUnsigned(module.functions.whereType<DefinedFunction>().length);
+    for (var function in module.functions) {
+      if (function is DefinedFunction) writeUnsigned(function.type.index);
+    }
   }
 }
 
@@ -184,7 +270,7 @@ class GlobalSection extends Section {
 
   @override
   void serializeContents() {
-    writeList(module.globals);
+    writeList(module.globals.whereType<DefinedGlobal>().toList());
   }
 }
 
@@ -220,6 +306,6 @@ class CodeSection extends Section {
 
   @override
   void serializeContents() {
-    writeList(module.functions);
+    writeList(module.functions.whereType<DefinedFunction>().toList());
   }
 }
