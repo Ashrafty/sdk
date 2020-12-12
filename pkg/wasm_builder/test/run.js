@@ -28,4 +28,4 @@ var inst = new WebAssembly.Instance(module, importObject);
 
 console.log("Instantiated module!");
 
-console.log(inst.exports.sequence(12, 34));
+console.log(inst.exports.main(12, 34));

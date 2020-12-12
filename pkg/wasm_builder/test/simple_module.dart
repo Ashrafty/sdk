@@ -14,7 +14,7 @@ main(List<String> args) {
 
   var printNum = m.importFunction('console', 'log', printtype);
   var fun = m.addFunction(ftype);
-  m.exportFunction("sequence", fun);
+  m.exportFunction("main", fun);
 
   var sumVar = fun.addLocal(NumType.f64);
   Instructions b = fun.body;
