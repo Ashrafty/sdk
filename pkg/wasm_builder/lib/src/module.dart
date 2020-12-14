@@ -12,10 +12,10 @@ class Module with SerializerMixin {
   Map<_FunctionTypeKey, FunctionType> functionTypeMap = {};
 
   List<DefType> defTypes = [];
-  List<Function> functions = [];
+  List<BaseFunction> functions = [];
   List<Global> globals = [];
   List<Export> exports = [];
-  Function? startFunction = null;
+  BaseFunction? startFunction = null;
 
   bool anyFunctionsDefined = false;
   bool anyGlobalsDefined = false;
@@ -56,7 +56,7 @@ class Module with SerializerMixin {
     return function;
   }
 
-  DefinedGlobal addGlobal(FieldType type) {
+  DefinedGlobal addGlobal(GlobalType type) {
     anyGlobalsDefined = true;
     final global = DefinedGlobal(this, functions.length, type);
     globals.add(global);
@@ -73,7 +73,7 @@ class Module with SerializerMixin {
     return function;
   }
 
-  ImportedGlobal importGlobal(String module, String name, FieldType type) {
+  ImportedGlobal importGlobal(String module, String name, GlobalType type) {
     if (anyGlobalsDefined) {
       throw "All global imports must be specified before any definitions.";
     }
@@ -82,7 +82,7 @@ class Module with SerializerMixin {
     return global;
   }
 
-  void exportFunction(String name, Function function) {
+  void exportFunction(String name, BaseFunction function) {
     exports.add(FunctionExport(name, function));
   }
 
@@ -137,12 +137,94 @@ class _FunctionTypeKey {
   }
 }
 
+abstract class BaseFunction {
+  int index;
+  final FunctionType type;
+
+  BaseFunction(this.index, this.type);
+}
+
+class DefinedFunction extends BaseFunction
+    with SerializerMixin
+    implements Serializable {
+  final List<Local> locals = [];
+  late final Instructions body;
+
+  DefinedFunction(Module module, int index, FunctionType type)
+      : super(index, type) {
+    for (ValueType paramType in type.inputs) {
+      addLocal(paramType);
+    }
+    body = Instructions(module, type.outputs, locals);
+  }
+
+  Local addLocal(ValueType type) {
+    Local local = Local(locals.length, type);
+    locals.add(local);
+    return local;
+  }
+
+  @override
+  void serialize(Serializer s) {
+    // Serialize locals internally
+    int paramCount = type.inputs.length;
+    int entries = 0;
+    for (int i = paramCount + 1; i <= locals.length; i++) {
+      if (i == locals.length || locals[i - 1].type != locals[i].type) entries++;
+    }
+    writeUnsigned(entries);
+    int start = 0;
+    for (int i = paramCount + 1; i <= locals.length; i++) {
+      if (i == locals.length || locals[i - 1].type != locals[i].type) {
+        writeUnsigned(i - start);
+        write(locals[i - 1].type);
+        start = i;
+      }
+    }
+
+    // Bundle locals and body
+    assert(body.isComplete);
+    s.writeUnsigned(data.length + body.data.length);
+    s.writeBytes(data);
+    s.writeBytes(body.data);
+  }
+}
+
+class Local {
+  final int index;
+  final ValueType type;
+
+  Local(this.index, this.type);
+}
+
+abstract class Global {
+  final int index;
+  final GlobalType type;
+
+  Global(this.index, this.type);
+}
+
+class DefinedGlobal extends Global implements Serializable {
+  final Instructions initializer;
+
+  DefinedGlobal(Module module, int index, GlobalType type)
+      : initializer = Instructions(module, [type.type]),
+        super(index, type);
+
+  @override
+  void serialize(Serializer s) {
+    assert(initializer.isComplete);
+    s.write(type);
+    s.writeBytes(initializer.data);
+  }
+}
+
 abstract class Import implements Serializable {
   String get module;
   String get name;
 }
 
-class ImportedFunction extends Function implements Import {
+class ImportedFunction extends BaseFunction implements Import {
   String module;
   String name;
 
@@ -162,7 +244,7 @@ class ImportedGlobal extends Global implements Import {
   String module;
   String name;
 
-  ImportedGlobal(this.module, this.name, int index, FieldType type)
+  ImportedGlobal(this.module, this.name, int index, GlobalType type)
       : super(index, type);
 
   @override
@@ -181,7 +263,7 @@ abstract class Export implements Serializable {
 }
 
 class FunctionExport extends Export {
-  Function function;
+  BaseFunction function;
 
   FunctionExport(String name, this.function) : super(name);
 

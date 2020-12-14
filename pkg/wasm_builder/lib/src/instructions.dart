@@ -6,105 +6,33 @@ import 'module.dart';
 import 'serialize.dart';
 import 'types.dart';
 
-abstract class Function {
-  int index;
-  final FunctionType type;
-
-  Function(this.index, this.type);
-}
-
-class DefinedFunction extends Function
-    with SerializerMixin
-    implements Serializable {
-  final List<Local> locals = [];
-  late final Instructions body;
-
-  DefinedFunction(Module module, int index, FunctionType type)
-      : super(index, type) {
-    for (ValueType paramType in type.inputs) {
-      addLocal(paramType);
-    }
-    body = Instructions(module, type.outputs, locals);
-  }
-
-  Local addLocal(ValueType type) {
-    Local local = Local(locals.length, type);
-    locals.add(local);
-    return local;
-  }
-
-  @override
-  void serialize(Serializer s) {
-    // Serialize locals internally
-    int paramCount = type.inputs.length;
-    int entries = 0;
-    for (int i = paramCount + 1; i <= locals.length; i++) {
-      if (i == locals.length || locals[i - 1].type != locals[i].type) entries++;
-    }
-    writeUnsigned(entries);
-    int start = 0;
-    for (int i = paramCount + 1; i <= locals.length; i++) {
-      if (i == locals.length || locals[i - 1].type != locals[i].type) {
-        writeUnsigned(i - start);
-        write(locals[i - 1].type);
-        start = i;
-      }
-    }
-
-    // Bundle locals and body
-    assert(body.isComplete);
-    s.writeUnsigned(data.length + body.data.length);
-    s.writeBytes(data);
-    s.writeBytes(body.data);
-  }
-}
-
-class Local {
-  final int index;
-  final ValueType type;
-
-  Local(this.index, this.type);
-}
-
-abstract class Global {
-  final int index;
-  final FieldType type;
-
-  Global(this.index, this.type);
-}
-
-class DefinedGlobal extends Global implements Serializable {
-  final Instructions initializer;
-
-  DefinedGlobal(Module module, int index, FieldType type)
-      : initializer = Instructions(module, [type.type as ValueType]),
-        super(index, type);
-
-  @override
-  void serialize(Serializer s) {
-    assert(initializer.isComplete);
-    s.write(type);
-    s.writeBytes(initializer.data);
-  }
-}
-
 abstract class Label {
-  late final int depth;
   final List<ValueType> inputs;
   final List<ValueType> outputs;
 
+  late final int depth;
+  late final int baseStackHeight;
+  bool containsJump = false;
+
   Label._(this.inputs, this.outputs);
 
+  void markJump() => containsJump = true;
+
   List<ValueType> get targetTypes;
+
+  bool get jumpToEnd;
 }
 
 class Expression extends Label {
   Expression(List<ValueType> inputs, List<ValueType> outputs)
       : super._(inputs, outputs) {
     depth = 0;
+    baseStackHeight = 0;
   }
 
   List<ValueType> get targetTypes => outputs;
+
+  bool get jumpToEnd => false;
 }
 
 class Block extends Label {
@@ -112,6 +40,8 @@ class Block extends Label {
       : super._(inputs, outputs);
 
   List<ValueType> get targetTypes => outputs;
+
+  bool get jumpToEnd => containsJump;
 }
 
 class Loop extends Label {
@@ -119,6 +49,8 @@ class Loop extends Label {
       : super._(inputs, outputs);
 
   List<ValueType> get targetTypes => inputs;
+
+  bool get jumpToEnd => false;
 }
 
 class If extends Label {
@@ -126,12 +58,17 @@ class If extends Label {
       : super._(inputs, outputs);
 
   List<ValueType> get targetTypes => outputs;
+
+  bool get jumpToEnd => containsJump;
 }
 
 class Instructions with SerializerMixin {
   final Module module;
   final List<Local> locals;
+
   final List<Label> labelStack = [];
+  final List<ValueType> stackTypes = [];
+  bool reachable = true;
 
   Instructions(this.module, List<ValueType> outputs, [this.locals = const []]) {
     labelStack.add(Expression(const [], outputs));
@@ -139,9 +76,66 @@ class Instructions with SerializerMixin {
 
   bool get isComplete => labelStack.isEmpty;
 
+  void _reportError(String error) {
+    throw error;
+  }
+
+  void _checkStackTypes(List<ValueType> inputs) {
+    bool typesMatch = true;
+    for (int i = 0; i < inputs.length; i++) {
+      if (!stackTypes[stackTypes.length - inputs.length + i]
+          .isSubtypeOf(inputs[i])) {
+        typesMatch = false;
+      }
+    }
+    if (!typesMatch) {
+      String expected = inputs.join(', ');
+      String got = stackTypes
+          .sublist(stackTypes.length - inputs.length, stackTypes.length)
+          .join(', ');
+      _reportError("Expected [$expected], but stack contained [$got]");
+    }
+  }
+
+  bool _verifyTypes(List<ValueType> inputs, List<ValueType> outputs,
+      {bool allowLocalUnderflow = false}) {
+    if (!reachable) _reportError("Unreachable instruction");
+    if (allowLocalUnderflow) {
+      if (stackTypes.length < inputs.length) {
+        _reportError("Stack underflow");
+      }
+    } else {
+      if (stackTypes.length - inputs.length < labelStack.last.baseStackHeight) {
+        _reportError("Underflowing base stack of innermost block");
+      }
+    }
+    _checkStackTypes(inputs);
+    stackTypes.length -= inputs.length;
+    stackTypes.addAll(outputs);
+    return true;
+  }
+
+  bool _verifyEndOfBlock(List<ValueType> outputs) {
+    Label label = labelStack.last;
+    if (reachable) {
+      int delta =
+          stackTypes.length - (label.baseStackHeight + label.outputs.length);
+      if (delta != 0) {
+        String deltaString = "${delta > 0 ? '+' : ''}$delta";
+        _reportError("Incorrect stack height ($deltaString) at end of block");
+      }
+      _checkStackTypes(label.outputs);
+    }
+    assert(stackTypes.length >= label.baseStackHeight);
+    stackTypes.length = label.baseStackHeight;
+    stackTypes.addAll(outputs);
+    return true;
+  }
+
   // Control instructions
 
   void unreachable() {
+    reachable = false;
     writeByte(0x00);
   }
 
@@ -150,7 +144,9 @@ class Instructions with SerializerMixin {
   }
 
   Label _beginBlock(int encoding, Label label) {
+    assert(_verifyTypes(label.inputs, label.inputs, allowLocalUnderflow: true));
     label.depth = labelStack.length;
+    label.baseStackHeight = stackTypes.length - label.inputs.length;
     labelStack.add(label);
     writeByte(encoding);
     if (label.inputs.isEmpty && label.outputs.isEmpty) {
@@ -165,24 +161,32 @@ class Instructions with SerializerMixin {
   }
 
   Label block(
-          [List<ValueType> inputs = const [],
-          List<ValueType> outputs = const []]) =>
-      _beginBlock(0x02, Block(inputs, outputs));
-  Label loop(
-          [List<ValueType> inputs = const [],
-          List<ValueType> outputs = const []]) =>
-      _beginBlock(0x03, Loop(inputs, outputs));
-  Label if_(
-          [List<ValueType> inputs = const [],
-          List<ValueType> outputs = const []]) =>
-      _beginBlock(0x04, If(inputs, outputs));
+      [List<ValueType> inputs = const [], List<ValueType> outputs = const []]) {
+    return _beginBlock(0x02, Block(inputs, outputs));
+  }
 
-  void else_(Label label) {
-    assert(label == labelStack.last);
+  Label loop(
+      [List<ValueType> inputs = const [], List<ValueType> outputs = const []]) {
+    return _beginBlock(0x03, Loop(inputs, outputs));
+  }
+
+  Label if_(
+      [List<ValueType> inputs = const [], List<ValueType> outputs = const []]) {
+    assert(_verifyTypes(const [NumType.i32], const []));
+    return _beginBlock(0x04, If(inputs, outputs));
+  }
+
+  void else_() {
+    assert(labelStack.last is If);
+    assert(_verifyEndOfBlock(labelStack.last.inputs));
+    if (reachable) labelStack.last.markJump();
+    reachable = true;
     writeByte(0x05);
   }
 
   void end() {
+    assert(_verifyEndOfBlock(labelStack.last.outputs));
+    reachable |= labelStack.last.jumpToEnd;
     labelStack.removeLast();
     writeByte(0x0B);
   }
@@ -198,16 +202,32 @@ class Instructions with SerializerMixin {
   }
 
   void br(Label label) {
+    assert(_verifyTypes(label.targetTypes, const []));
+    label.markJump();
+    reachable = false;
     writeByte(0x0C);
     _writeLabel(label);
   }
 
   void br_if(Label label) {
+    assert(_verifyTypes(const [NumType.i32], const []));
+    assert(_verifyTypes(label.targetTypes,
+        stackTypes.sublist(stackTypes.length - label.targetTypes.length)));
+    label.markJump();
     writeByte(0x0D);
     _writeLabel(label);
   }
 
   void br_table(List<Label> labels, Label defaultLabel) {
+    // TODO: Check incoming types against all target labels.
+    assert(_verifyTypes(const [NumType.i32], const []));
+    assert(_verifyTypes(
+        defaultLabel.targetTypes,
+        stackTypes
+            .sublist(stackTypes.length - defaultLabel.targetTypes.length)));
+    for (var label in labels) label.markJump();
+    defaultLabel.markJump();
+    reachable = false;
     writeByte(0x0E);
     writeUnsigned(labels.length);
     for (Label label in labels) {
@@ -217,15 +237,19 @@ class Instructions with SerializerMixin {
   }
 
   void return_() {
+    assert(_verifyTypes(labelStack[0].outputs, const []));
+    reachable = false;
     writeByte(0x0F);
   }
 
-  void call(Function function) {
+  void call(BaseFunction function) {
+    assert(_verifyTypes(function.type.inputs, function.type.outputs));
     writeByte(0x10);
     writeUnsigned(function.index);
   }
 
   void call_indirect(FunctionType type) {
+    assert(_verifyTypes([...type.inputs, NumType.i32], type.outputs));
     writeByte(0x11);
     writeUnsigned(type.index);
     writeByte(0x00);
@@ -234,10 +258,13 @@ class Instructions with SerializerMixin {
   // Parametric instructions
 
   void drop() {
+    assert(_verifyTypes([stackTypes.last], const []));
     writeByte(0x1A);
   }
 
   void select() {
+    assert(_verifyTypes(const [NumType.i32], const []));
+    assert(_verifyTypes([stackTypes.last, stackTypes.last], [stackTypes.last]));
     writeByte(0x1B);
   }
 
@@ -245,29 +272,34 @@ class Instructions with SerializerMixin {
 
   void local_get(Local local) {
     assert(locals[local.index] == local);
+    assert(_verifyTypes(const [], [local.type]));
     writeByte(0x20);
     writeUnsigned(local.index);
   }
 
   void local_set(Local local) {
     assert(locals[local.index] == local);
+    assert(_verifyTypes([local.type], const []));
     writeByte(0x21);
     writeUnsigned(local.index);
   }
 
   void local_tee(Local local) {
     assert(locals[local.index] == local);
+    assert(_verifyTypes([local.type], [stackTypes.last]));
     writeByte(0x22);
     writeUnsigned(local.index);
   }
 
   void global_get(Global global) {
+    assert(_verifyTypes(const [], [global.type.type]));
     writeByte(0x23);
     writeUnsigned(global.index);
   }
 
   void global_set(Global global) {
     assert(global.type.mutable);
+    assert(_verifyTypes([global.type.type], const []));
     writeByte(0x24);
     writeUnsigned(global.index);
   }
@@ -277,119 +309,181 @@ class Instructions with SerializerMixin {
   // Reference instructions
 
   void ref_null(HeapType type) {
+    assert(_verifyTypes(const [], [RefType(type, nullable: true)]));
     writeByte(0xD0);
     write(type);
   }
 
   void ref_is_null() {
+    assert(_verifyTypes([RefType.any()], const [NumType.i32]));
     writeByte(0xD1);
   }
 
-  void ref_func(Function function) {
+  void ref_func(BaseFunction function) {
+    assert(
+        _verifyTypes(const [], [RefType.def(function.type, nullable: false)]));
     writeByte(0xD2);
     writeUnsigned(function.index);
   }
 
   void ref_as_non_null() {
+    assert(_verifyTypes(
+        [RefType.any()], [stackTypes.last.withNullability(false)]));
     writeByte(0xD3);
   }
 
   void br_on_null(Label label) {
+    assert(_verifyTypes([
+      ...label.targetTypes,
+      RefType.any()
+    ], [
+      ...stackTypes.sublist(stackTypes.length - 1 - label.targetTypes.length,
+          stackTypes.length - 1),
+      stackTypes.last.withNullability(false)
+    ]));
     writeByte(0xD4);
     _writeLabel(label);
   }
 
   void ref_eq() {
+    assert(_verifyTypes([RefType.eq(), RefType.eq()], const [NumType.i32]));
     writeByte(0xD5);
   }
 
-  void struct_new_with_rtt(ValueType structType) {
+  void struct_new_with_rtt(StructType structType) {
+    assert(_verifyTypes([
+      ...structType.fields.map((f) => f.type.unpacked),
+      Rtt(HeapType.def(structType))
+    ], [
+      RefType.def(structType, nullable: false)
+    ]));
     writeBytes(const [0xFB, 0x01]);
-    write(structType);
+    writeUnsigned(structType.index);
   }
 
-  void struct_new_default_with_rtt(ValueType structType) {
+  void struct_new_default_with_rtt(StructType structType) {
+    assert(_verifyTypes([Rtt(HeapType.def(structType))],
+        [RefType.def(structType, nullable: false)]));
     writeBytes(const [0xFB, 0x02]);
-    write(structType);
+    writeUnsigned(structType.index);
   }
 
-  void struct_get(ValueType structType, int fieldIndex) {
+  void struct_get(StructType structType, int fieldIndex) {
+    assert(structType.fields[fieldIndex].type is ValueType);
+    assert(_verifyTypes([RefType.def(structType, nullable: true)],
+        [structType.fields[fieldIndex].type.unpacked]));
     writeBytes(const [0xFB, 0x03]);
-    write(structType);
+    writeUnsigned(structType.index);
     writeUnsigned(fieldIndex);
   }
 
-  void struct_get_s(ValueType structType, int fieldIndex) {
+  void struct_get_s(StructType structType, int fieldIndex) {
+    assert(structType.fields[fieldIndex].type is PackedType);
+    assert(_verifyTypes([RefType.def(structType, nullable: true)],
+        [structType.fields[fieldIndex].type.unpacked]));
     writeBytes(const [0xFB, 0x04]);
-    write(structType);
+    writeUnsigned(structType.index);
     writeUnsigned(fieldIndex);
   }
 
-  void struct_get_u(ValueType structType, int fieldIndex) {
+  void struct_get_u(StructType structType, int fieldIndex) {
+    assert(structType.fields[fieldIndex].type is PackedType);
+    assert(_verifyTypes([RefType.def(structType, nullable: true)],
+        [structType.fields[fieldIndex].type.unpacked]));
     writeBytes(const [0xFB, 0x05]);
-    write(structType);
+    writeUnsigned(structType.index);
     writeUnsigned(fieldIndex);
   }
 
-  void struct_set(ValueType structType, int fieldIndex) {
+  void struct_set(StructType structType, int fieldIndex) {
+    assert(_verifyTypes([
+      RefType.def(structType, nullable: true),
+      structType.fields[fieldIndex].type.unpacked
+    ], const []));
     writeBytes(const [0xFB, 0x06]);
-    write(structType);
+    writeUnsigned(structType.index);
     writeUnsigned(fieldIndex);
   }
 
-  void array_new_with_rtt(ValueType arrayType) {
+  void array_new_with_rtt(ArrayType arrayType) {
+    assert(_verifyTypes(
+        [arrayType.elementType.type.unpacked, Rtt(HeapType.def(arrayType))],
+        [RefType.def(arrayType, nullable: false)]));
     writeBytes(const [0xFB, 0x11]);
-    write(arrayType);
+    writeUnsigned(arrayType.index);
   }
 
-  void array_new_default_with_rtt(ValueType arrayType) {
+  void array_new_default_with_rtt(ArrayType arrayType) {
+    assert(_verifyTypes([Rtt(HeapType.def(arrayType))],
+        [RefType.def(arrayType, nullable: false)]));
     writeBytes(const [0xFB, 0x12]);
-    write(arrayType);
+    writeUnsigned(arrayType.index);
   }
 
-  void array_get(ValueType arrayType) {
+  void array_get(ArrayType arrayType) {
+    assert(arrayType.elementType.type is ValueType);
+    assert(_verifyTypes([RefType.def(arrayType, nullable: true), NumType.i32],
+        [arrayType.elementType.type.unpacked]));
     writeBytes(const [0xFB, 0x13]);
-    write(arrayType);
+    writeUnsigned(arrayType.index);
   }
 
-  void array_get_s(ValueType arrayType) {
+  void array_get_s(ArrayType arrayType) {
+    assert(arrayType.elementType.type is PackedType);
+    assert(_verifyTypes([RefType.def(arrayType, nullable: true), NumType.i32],
+        [arrayType.elementType.type.unpacked]));
     writeBytes(const [0xFB, 0x14]);
-    write(arrayType);
+    writeUnsigned(arrayType.index);
   }
 
-  void array_get_u(ValueType arrayType) {
+  void array_get_u(ArrayType arrayType) {
+    assert(arrayType.elementType.type is PackedType);
+    assert(_verifyTypes([RefType.def(arrayType, nullable: true), NumType.i32],
+        [arrayType.elementType.type.unpacked]));
     writeBytes(const [0xFB, 0x15]);
-    write(arrayType);
+    writeUnsigned(arrayType.index);
   }
 
-  void array_set(ValueType arrayType) {
+  void array_set(ArrayType arrayType) {
+    assert(_verifyTypes([
+      RefType.def(arrayType, nullable: true),
+      NumType.i32,
+      arrayType.elementType.type.unpacked
+    ], const []));
     writeBytes(const [0xFB, 0x16]);
-    write(arrayType);
+    writeUnsigned(arrayType.index);
   }
 
-  void array_len(ValueType arrayType) {
+  void array_len(ArrayType arrayType) {
+    assert(_verifyTypes(
+        [RefType.def(arrayType, nullable: true)], const [NumType.i32]));
     writeBytes(const [0xFB, 0x17]);
-    write(arrayType);
+    writeUnsigned(arrayType.index);
   }
 
   void i31_new() {
+    assert(_verifyTypes(const [NumType.i32], [RefType.i31()]));
     writeBytes(const [0xFB, 0x20]);
   }
 
   void i31_get_s() {
+    assert(_verifyTypes([RefType.i31()], const [NumType.i32]));
     writeBytes(const [0xFB, 0x21]);
   }
 
   void i31_get_u() {
+    assert(_verifyTypes([RefType.i31()], const [NumType.i32]));
     writeBytes(const [0xFB, 0x22]);
   }
 
-  void rtt_canon(HeapType type) {
+  void rtt_canon(HeapType heapType) {
+    assert(_verifyTypes(const [], [Rtt(heapType, 0)]));
     writeBytes(const [0xFB, 0x30]);
-    write(type);
+    write(heapType);
   }
 
   void rtt_sub(int depth, HeapType superType, HeapType subType) {
+    assert(_verifyTypes([Rtt(superType, depth)], [Rtt(subType, depth + 1)]));
     writeBytes(const [0xFB, 0x31]);
     writeUnsigned(depth);
     write(superType);
@@ -397,18 +491,26 @@ class Instructions with SerializerMixin {
   }
 
   void ref_test(HeapType inputType, HeapType targetType) {
+    assert(_verifyTypes([RefType(inputType, nullable: true), Rtt(targetType)],
+        const [NumType.i32]));
     writeBytes(const [0xFB, 0x40]);
     write(inputType);
     write(targetType);
   }
 
   void ref_cast(HeapType inputType, HeapType targetType) {
+    assert(_verifyTypes([RefType(inputType, nullable: true), Rtt(targetType)],
+        [RefType(targetType, nullable: false)]));
     writeBytes(const [0xFB, 0x41]);
     write(inputType);
     write(targetType);
   }
 
   void br_on_cast(Label label, HeapType inputType, HeapType targetType) {
+    assert(_verifyTypes([RefType(inputType, nullable: true), Rtt(targetType)],
+        [RefType(inputType, nullable: true)]));
+    assert(RefType(targetType, nullable: false)
+        .isSubtypeOf(label.targetTypes.single));
     writeBytes(const [0xFB, 0x42]);
     _writeLabel(label);
     write(inputType);
@@ -418,567 +520,707 @@ class Instructions with SerializerMixin {
   // Numeric instructions
 
   void i32_const(int value) {
+    assert(_verifyTypes(const [], const [NumType.i32]));
     assert(-1 << 31 <= value && value < 1 << 31);
     writeByte(0x41);
     writeSigned(value);
   }
 
   void i64_const(int value) {
+    assert(_verifyTypes(const [], const [NumType.i64]));
     writeByte(0x42);
     writeSigned(value);
   }
 
   void f32_const(double value) {
+    assert(_verifyTypes(const [], const [NumType.f32]));
     writeByte(0x43);
     writeF32(value);
   }
 
   void f64_const(double value) {
+    assert(_verifyTypes(const [], const [NumType.f64]));
     writeByte(0x44);
     writeF64(value);
   }
 
   void i32_eqz() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x45);
   }
 
   void i32_eq() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x46);
   }
 
   void i32_ne() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x47);
   }
 
   void i32_lt_s() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x48);
   }
 
   void i32_lt_u() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x49);
   }
 
   void i32_gt_s() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x4A);
   }
 
   void i32_gt_u() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x4B);
   }
 
   void i32_le_s() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x4C);
   }
 
   void i32_le_u() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x4D);
   }
 
   void i32_ge_s() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x4E);
   }
 
   void i32_ge_u() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x4F);
   }
 
   void i64_eqz() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x50);
   }
 
   void i64_eq() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x51);
   }
 
   void i64_ne() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x52);
   }
 
   void i64_lt_s() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x53);
   }
 
   void i64_lt_u() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x54);
   }
 
   void i64_gt_s() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x55);
   }
 
   void i64_gt_u() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x56);
   }
 
   void i64_le_s() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x57);
   }
 
   void i64_le_u() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x58);
   }
 
   void i64_ge_s() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x59);
   }
 
   void i64_ge_u() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
     writeByte(0x5A);
   }
 
   void f32_eq() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32]));
     writeByte(0x5B);
   }
 
   void f32_ne() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32]));
     writeByte(0x5C);
   }
 
   void f32_lt() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32]));
     writeByte(0x5D);
   }
 
   void f32_gt() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32]));
     writeByte(0x5E);
   }
 
   void f32_le() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32]));
     writeByte(0x5F);
   }
 
   void f32_ge() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32]));
     writeByte(0x60);
   }
 
   void f64_eq() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32]));
     writeByte(0x61);
   }
 
   void f64_ne() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32]));
     writeByte(0x62);
   }
 
   void f64_lt() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32]));
     writeByte(0x63);
   }
 
   void f64_gt() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32]));
     writeByte(0x64);
   }
 
   void f64_le() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32]));
     writeByte(0x65);
   }
 
   void f64_ge() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32]));
     writeByte(0x66);
   }
 
   void i32_clz() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32]));
     writeByte(0x67);
   }
 
   void i32_ctz() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32]));
     writeByte(0x68);
   }
 
   void i32_popcnt() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32]));
     writeByte(0x69);
   }
 
   void i32_add() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x6A);
   }
 
   void i32_sub() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x6B);
   }
 
   void i32_mul() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x6C);
   }
 
   void i32_div_s() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x6D);
   }
 
   void i32_div_u() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x6E);
   }
 
   void i32_rem_s() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x6F);
   }
 
   void i32_rem_u() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x70);
   }
 
   void i32_and() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x71);
   }
 
   void i32_or() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x72);
   }
 
   void i32_xor() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x73);
   }
 
   void i32_shl() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x74);
   }
 
   void i32_shr_s() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x75);
   }
 
   void i32_shr_u() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x76);
   }
 
   void i32_rotl() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x77);
   }
 
   void i32_rotr() {
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
     writeByte(0x78);
   }
 
   void i64_clz() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.i64]));
     writeByte(0x79);
   }
 
   void i64_ctz() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.i64]));
     writeByte(0x7A);
   }
 
   void i64_popcnt() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.i64]));
     writeByte(0x7B);
   }
 
   void i64_add() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x7C);
   }
 
   void i64_sub() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x7D);
   }
 
   void i64_mul() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x7E);
   }
 
   void i64_div_s() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x7F);
   }
 
   void i64_div_u() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x80);
   }
 
   void i64_rem_s() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x81);
   }
 
   void i64_rem_u() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x82);
   }
 
   void i64_and() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x83);
   }
 
   void i64_or() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x84);
   }
 
   void i64_xor() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x85);
   }
 
   void i64_shl() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x86);
   }
 
   void i64_shr_s() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x87);
   }
 
   void i64_shr_u() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x88);
   }
 
   void i64_rotl() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x89);
   }
 
   void i64_rotr() {
+    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64]));
     writeByte(0x8A);
   }
 
   void f32_abs() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.f32]));
     writeByte(0x8B);
   }
 
   void f32_neg() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.f32]));
     writeByte(0x8C);
   }
 
   void f32_ceil() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.f32]));
     writeByte(0x8D);
   }
 
   void f32_floor() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.f32]));
     writeByte(0x8E);
   }
 
   void f32_trunc() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.f32]));
     writeByte(0x8F);
   }
 
   void f32_nearest() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.f32]));
     writeByte(0x90);
   }
 
   void f32_sqrt() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.f32]));
     writeByte(0x91);
   }
 
   void f32_add() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32]));
     writeByte(0x92);
   }
 
   void f32_sub() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32]));
     writeByte(0x93);
   }
 
   void f32_mul() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32]));
     writeByte(0x94);
   }
 
   void f32_div() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32]));
     writeByte(0x95);
   }
 
   void f32_min() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32]));
     writeByte(0x96);
   }
 
   void f32_max() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32]));
     writeByte(0x97);
   }
 
   void f32_copysign() {
+    assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32]));
     writeByte(0x98);
   }
 
   void f64_abs() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.f64]));
     writeByte(0x99);
   }
 
   void f64_neg() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.f64]));
     writeByte(0x9A);
   }
 
   void f64_ceil() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.f64]));
     writeByte(0x9B);
   }
 
   void f64_floor() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.f64]));
     writeByte(0x9C);
   }
 
   void f64_trunc() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.f64]));
     writeByte(0x9D);
   }
 
   void f64_nearest() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.f64]));
     writeByte(0x9E);
   }
 
   void f64_sqrt() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.f64]));
     writeByte(0x9F);
   }
 
   void f64_add() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64]));
     writeByte(0xA0);
   }
 
   void f64_sub() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64]));
     writeByte(0xA1);
   }
 
   void f64_mul() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64]));
     writeByte(0xA2);
   }
 
   void f64_div() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64]));
     writeByte(0xA3);
   }
 
   void f64_min() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64]));
     writeByte(0xA4);
   }
 
   void f64_max() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64]));
     writeByte(0xA5);
   }
 
   void f64_copysign() {
+    assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64]));
     writeByte(0xA6);
   }
 
   void i32_wrap_i64() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.i32]));
     writeByte(0xA7);
   }
 
   void i32_trunc_f32_s() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.i32]));
     writeByte(0xA8);
   }
 
   void i32_trunc_f32_u() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.i32]));
     writeByte(0xA9);
   }
 
   void i32_trunc_f64_s() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.i32]));
     writeByte(0xAA);
   }
 
   void i32_trunc_f64_u() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.i32]));
     writeByte(0xAB);
   }
 
   void i64_extend_i32_s() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i64]));
     writeByte(0xAC);
   }
 
   void i64_extend_i32_u() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i64]));
     writeByte(0xAD);
   }
 
   void i64_trunc_f32_s() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.i64]));
     writeByte(0xAE);
   }
 
   void i64_trunc_f32_u() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.i64]));
     writeByte(0xAF);
   }
 
   void i64_trunc_f64_s() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.i64]));
     writeByte(0xB0);
   }
 
   void i64_trunc_f64_u() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.i64]));
     writeByte(0xB1);
   }
 
   void f32_convert_i32_s() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.f32]));
     writeByte(0xB2);
   }
 
   void f32_convert_i32_u() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.f32]));
     writeByte(0xB3);
   }
 
   void f32_convert_i64_s() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.f32]));
     writeByte(0xB4);
   }
 
   void f32_convert_i64_u() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.f32]));
     writeByte(0xB5);
   }
 
   void f32_demote_f64() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.f32]));
     writeByte(0xB6);
   }
 
   void f64_convert_i32_s() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.f64]));
     writeByte(0xB7);
   }
 
   void f64_convert_i32_u() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.f64]));
     writeByte(0xB8);
   }
 
   void f64_convert_i64_s() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.f64]));
     writeByte(0xB9);
   }
 
   void f64_convert_i64_u() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.f64]));
     writeByte(0xBA);
   }
 
   void f64_promote_f32() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.f64]));
     writeByte(0xBB);
   }
 
   void i32_reinterpret_f32() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.i32]));
     writeByte(0xBC);
   }
 
   void i64_reinterpret_f64() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.i64]));
     writeByte(0xBD);
   }
 
   void f32_reinterpret_i32() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.f32]));
     writeByte(0xBE);
   }
 
   void f64_reinterpret_i64() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.f64]));
     writeByte(0xBF);
   }
 
   void i32_extend8_s() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32]));
     writeByte(0xC0);
   }
 
   void i32_extend16_s() {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32]));
     writeByte(0xC1);
   }
 
   void i64_extend8_s() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.i64]));
     writeByte(0xC2);
   }
 
   void i64_extend16_s() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.i64]));
     writeByte(0xC3);
   }
 
   void i64_extend32_s() {
+    assert(_verifyTypes(const [NumType.i64], const [NumType.i64]));
     writeByte(0xC4);
   }
 
   void i32_trunc_sat_f32_s() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.i32]));
     writeBytes(const [0xFC, 0x00]);
   }
 
   void i32_trunc_sat_f32_u() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.i32]));
     writeBytes(const [0xFC, 0x01]);
   }
 
   void i32_trunc_sat_f64_s() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.i32]));
     writeBytes(const [0xFC, 0x02]);
   }
 
   void i32_trunc_sat_f64_u() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.i32]));
     writeBytes(const [0xFC, 0x03]);
   }
 
   void i64_trunc_sat_f32_s() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.i64]));
     writeBytes(const [0xFC, 0x04]);
   }
 
   void i64_trunc_sat_f32_u() {
+    assert(_verifyTypes(const [NumType.f32], const [NumType.i64]));
     writeBytes(const [0xFC, 0x05]);
   }
 
   void i64_trunc_sat_f64_s() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.i64]));
     writeBytes(const [0xFC, 0x06]);
   }
 
   void i64_trunc_sat_f64_u() {
+    assert(_verifyTypes(const [NumType.f64], const [NumType.i64]));
     writeBytes(const [0xFC, 0x07]);
   }
 }

@@ -10,7 +10,7 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class Translator {
   Component component;
-  Map<Member, w.Function> functions = {};
+  Map<Member, w.BaseFunction> functions = {};
   late Procedure mainFunction;
   late w.Module m;
 
@@ -38,7 +38,7 @@ class Translator {
     Analyzer(this).visitComponent(component);
     var codeGen = CodeGenerator(this);
     for (Member member in functions.keys) {
-      w.Function function = functions[member]!;
+      w.BaseFunction function = functions[member]!;
       if (function is w.DefinedFunction) {
         print(member.function.body);
         codeGen.generate(member, function);

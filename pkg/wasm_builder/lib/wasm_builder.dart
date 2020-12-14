@@ -2,13 +2,23 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-export 'src/module.dart' show ImportedFunction, ImportedGlobal, Module;
+export 'src/module.dart'
+    show
+        DefinedFunction,
+        DefinedGlobal,
+        BaseFunction,
+        Global,
+        ImportedFunction,
+        ImportedGlobal,
+        Local,
+        Module;
 export 'src/types.dart'
     show
         ArrayType,
         DefType,
         FieldType,
         FunctionType,
+        GlobalType,
         HeapType,
         NumType,
         PackedType,
@@ -17,12 +27,4 @@ export 'src/types.dart'
         StorageType,
         StructType,
         ValueType;
-export 'src/instructions.dart'
-    show
-        DefinedFunction,
-        DefinedGlobal,
-        Function,
-        Global,
-        Instructions,
-        Label,
-        Local;
+export 'src/instructions.dart' show Instructions, Label;

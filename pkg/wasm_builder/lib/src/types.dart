@@ -6,10 +6,17 @@ import 'serialize.dart';
 
 abstract class StorageType implements Serializable {
   bool isSubtypeOf(StorageType other);
+
+  ValueType get unpacked;
 }
 
 abstract class ValueType implements StorageType {
   const ValueType();
+
+  @override
+  ValueType get unpacked => this;
+
+  ValueType withNullability(bool nullable) => this;
 }
 
 enum NumTypeKind { i32, i64, f32, f64, v128 }
@@ -68,17 +75,18 @@ class NumType extends ValueType {
 
 class Rtt extends ValueType {
   final HeapType heapType;
-  final int depth;
+  final int? depth;
 
-  const Rtt(this.heapType, this.depth);
+  const Rtt(this.heapType, [this.depth]);
 
   @override
-  bool isSubtypeOf(StorageType other) => this == other;
+  bool isSubtypeOf(StorageType other) =>
+      other is Rtt && heapType == other.heapType;
 
   @override
   void serialize(Serializer s) {
     s.writeByte(0x69);
-    s.writeUnsigned(depth);
+    s.writeUnsigned(depth!);
     s.write(heapType);
   }
 
@@ -90,30 +98,34 @@ class Rtt extends ValueType {
       other is Rtt && other.heapType == heapType && other.depth == depth;
 
   @override
-  int get hashCode => heapType.hashCode * (3 + depth * 2);
+  int get hashCode => heapType.hashCode * (3 + depth! * 2);
 }
 
 class RefType extends ValueType {
   final HeapType heapType;
   final bool nullable;
 
-  RefType._(this.heapType, bool? nullable)
+  RefType(this.heapType, {bool? nullable})
       : this.nullable = nullable ??
             heapType.defaultNullability ??
             (throw "Unspecified nullability");
 
-  RefType.any({bool? nullable}) : this._(HeapType.any, nullable);
-  RefType.eq({bool? nullable}) : this._(HeapType.eq, nullable);
-  RefType.i31({bool? nullable}) : this._(HeapType.i31, nullable);
-  RefType.func({bool? nullable}) : this._(HeapType.func, nullable);
-  RefType.extern({bool? nullable}) : this._(HeapType.extern, nullable);
+  RefType.any({bool? nullable}) : this(HeapType.any, nullable: nullable);
+  RefType.eq({bool? nullable}) : this(HeapType.eq, nullable: nullable);
+  RefType.i31({bool? nullable}) : this(HeapType.i31, nullable: nullable);
+  RefType.func({bool? nullable}) : this(HeapType.func, nullable: nullable);
+  RefType.extern({bool? nullable}) : this(HeapType.extern, nullable: nullable);
   RefType.def(DefType defType, {required bool nullable})
-      : this._(HeapType.def(defType), nullable);
+      : this(HeapType.def(defType), nullable: nullable);
+
+  @override
+  ValueType withNullability(bool nullable) =>
+      RefType(heapType, nullable: nullable);
 
   @override
   bool isSubtypeOf(StorageType other) {
     if (other is! RefType) return false;
-    if (!nullable && other.nullable) return false;
+    if (nullable && !other.nullable) return false;
     return heapType.isSubtypeOf(other.heapType);
   }
 
@@ -343,11 +355,28 @@ class ArrayType extends DefType {
   String toString() => name;
 }
 
-class FieldType implements Serializable {
-  final StorageType type;
+class _WithMutability<T extends StorageType> implements Serializable {
+  final T type;
   final bool mutable;
 
-  FieldType(this.type, {this.mutable = true});
+  _WithMutability(this.type, this.mutable);
+
+  @override
+  void serialize(Serializer s) {
+    s.write(type);
+    s.writeByte(mutable ? 0x01 : 0x00);
+  }
+
+  @override
+  String toString() => "${mutable ? "var " : "const "}$type";
+}
+
+class GlobalType extends _WithMutability<ValueType> {
+  GlobalType(ValueType type, {bool mutable = true}) : super(type, mutable);
+}
+
+class FieldType extends _WithMutability<StorageType> {
+  FieldType(StorageType type, {bool mutable = true}) : super(type, mutable);
 
   FieldType.i8({bool mutable: true}) : this(PackedType.i8, mutable: mutable);
   FieldType.i16({bool mutable: true}) : this(PackedType.i16, mutable: mutable);
@@ -362,15 +391,6 @@ class FieldType implements Serializable {
       return type.isSubtypeOf(other.type);
     }
   }
-
-  @override
-  void serialize(Serializer s) {
-    s.write(type);
-    s.writeByte(mutable ? 0x01 : 0x00);
-  }
-
-  @override
-  String toString() => "${mutable ? "var " : "const "}$type";
 }
 
 enum PackedTypeKind { i8, i16 }
@@ -382,6 +402,9 @@ class PackedType implements StorageType {
 
   static const i8 = PackedType._(PackedTypeKind.i8);
   static const i16 = PackedType._(PackedTypeKind.i16);
+
+  @override
+  ValueType get unpacked => NumType.i32;
 
   @override
   bool isSubtypeOf(StorageType other) => this == other;

@@ -39,7 +39,7 @@ class CodeGenerator extends Visitor<void> {
 
   void visitStaticInvocation(StaticInvocation node) {
     node.arguments.accept(this);
-    w.Function target = translator.functions[node.target]!;
+    w.BaseFunction target = translator.functions[node.target]!;
     b.call(target);
   }
 
