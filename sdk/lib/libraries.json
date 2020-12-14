@@ -154,6 +154,95 @@
       }
     }
   },
+  "wasm": {
+    "libraries": {
+      "_builtin": {
+        "uri": "_internal/wasm/lib/builtin.dart"
+      },
+      "_internal": {
+        "uri": "internal/internal.dart",
+        "patches": [
+          "_internal/wasm/lib/internal_patch.dart",
+          "_internal/wasm/lib/patch.dart"
+        ]
+      },
+      "async": {
+        "uri": "async/async.dart",
+        "patches": [
+        ]
+      },
+      "collection": {
+        "uri": "collection/collection.dart",
+        "patches": [
+        ]
+      },
+      "convert": {
+        "uri": "convert/convert.dart",
+        "patches": [
+          "_internal/wasm/lib/convert_patch.dart"
+        ]
+      },
+      "core": {
+        "uri": "core/core.dart",
+        "patches": [
+          "_internal/wasm/lib/core_patch.dart",
+          "_internal/wasm/lib/expando_patch.dart"
+        ]
+      },
+      "developer": {
+        "uri": "developer/developer.dart",
+        "patches": [
+        ]
+      },
+      "ffi": {
+        "uri": "ffi/ffi.dart",
+        "patches": [
+        ]
+      },
+      "_http": {
+        "uri": "_http/http.dart"
+      },
+      "io": {
+        "uri": "io/io.dart",
+        "patches": [
+        ]
+      },
+      "isolate": {
+        "uri": "isolate/isolate.dart",
+        "patches": [
+        ]
+      },
+      "math": {
+        "uri": "math/math.dart",
+        "patches": [
+        ]
+      },
+      "mirrors": {
+        "uri": "mirrors/mirrors.dart",
+        "patches": [
+        ]
+      },
+      "nativewrappers": {
+        "uri": "html/dartium/nativewrappers.dart"
+      },
+      "cli": {
+        "uri": "cli/cli.dart",
+        "patches": [
+        ]
+      },
+      "typed_data": {
+        "uri": "typed_data/typed_data.dart",
+        "patches": [
+        ]
+      },
+      "_vmservice": {
+        "uri": "vmservice/vmservice.dart"
+      },
+      "vmservice_io": {
+        "uri": "_internal/vm/bin/vmservice_io.dart"
+      }
+    }
+  },
   "dart2js": {
     "libraries": {
       "async": {
