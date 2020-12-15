@@ -33,6 +33,7 @@ import 'package:kernel/target/changed_structure_notifier.dart';
 import 'package:kernel/target/targets.dart';
 import 'package:kernel/transformations/mixin_full_resolution.dart'
     as transformMixins show transformLibraries;
+import 'package:kernel/type_environment.dart';
 
 import 'package:vm/kernel_front_end.dart';
 import 'package:vm/target/vm.dart';
@@ -117,12 +118,24 @@ main(List<String> args) async {
 
   CompilerResult compilerResult = await kernelForProgram(mainUri, options);
   Component component = compilerResult.component;
-  await runGlobalTransformations(
-      target, component, true, false, false, false, ErrorDetector(),
-      minimalKernel: true);
 
-  print(compilerResult.component.libraries.map((l) => l.name).toList());
+  Procedure printMember = component.libraries
+      .firstWhere((l) => l.name == "dart.core")
+      .procedures
+      .firstWhere((p) => p.name.name == "print");
+  printMember.isExternal = true;
+  printMember.function.body = null;
 
-  var translator = Translator(component);
+  if (false)
+    await runGlobalTransformations(
+        target, component, true, false, false, false, ErrorDetector(),
+        minimalKernel: true);
+
+  print(component.libraries
+      .map((l) => "${l.name}: ${l.classes.length} ${l.members.length}")
+      .toList());
+
+  var translator = Translator(component, compilerResult.coreTypes,
+      TypeEnvironment(compilerResult.coreTypes, compilerResult.classHierarchy));
   File(args[1]).writeAsBytesSync(translator.translate().encode());
 }

@@ -54,12 +54,14 @@ class Loop extends Label {
 }
 
 class If extends Label {
+  bool hasElse = false;
+
   If(List<ValueType> inputs, List<ValueType> outputs)
       : super._(inputs, outputs);
 
   List<ValueType> get targetTypes => outputs;
 
-  bool get jumpToEnd => containsJump;
+  bool get jumpToEnd => containsJump || !hasElse;
 }
 
 class Instructions with SerializerMixin {
@@ -118,11 +120,10 @@ class Instructions with SerializerMixin {
   bool _verifyEndOfBlock(List<ValueType> outputs) {
     Label label = labelStack.last;
     if (reachable) {
-      int delta =
-          stackTypes.length - (label.baseStackHeight + label.outputs.length);
-      if (delta != 0) {
-        String deltaString = "${delta > 0 ? '+' : ''}$delta";
-        _reportError("Incorrect stack height ($deltaString) at end of block");
+      int expectedHeight = label.baseStackHeight + label.outputs.length;
+      if (stackTypes.length != expectedHeight) {
+        _reportError("Incorrect stack height at end of block"
+            " (expected $expectedHeight, actual ${stackTypes.length})");
       }
       _checkStackTypes(label.outputs);
     }
@@ -177,9 +178,10 @@ class Instructions with SerializerMixin {
   }
 
   void else_() {
-    assert(labelStack.last is If);
-    assert(_verifyEndOfBlock(labelStack.last.inputs));
-    if (reachable) labelStack.last.markJump();
+    If label = labelStack.last as If;
+    assert(_verifyEndOfBlock(label.inputs));
+    label.hasElse = true;
+    if (reachable) label.markJump();
     reachable = true;
     writeByte(0x05);
   }
@@ -545,7 +547,7 @@ class Instructions with SerializerMixin {
   }
 
   void i32_eqz() {
-    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32]));
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32]));
     writeByte(0x45);
   }
 
@@ -600,7 +602,7 @@ class Instructions with SerializerMixin {
   }
 
   void i64_eqz() {
-    assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32]));
+    assert(_verifyTypes(const [NumType.i64], const [NumType.i32]));
     writeByte(0x50);
   }
 
