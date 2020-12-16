@@ -83,6 +83,7 @@ class Module with SerializerMixin {
   }
 
   void exportFunction(String name, BaseFunction function) {
+    function.exportedName = name;
     exports.add(FunctionExport(name, function));
   }
 
@@ -140,6 +141,7 @@ class _FunctionTypeKey {
 abstract class BaseFunction {
   int index;
   final FunctionType type;
+  String? exportedName;
 
   BaseFunction(this.index, this.type);
 }
@@ -173,7 +175,7 @@ class DefinedFunction extends BaseFunction
       if (i == locals.length || locals[i - 1].type != locals[i].type) entries++;
     }
     writeUnsigned(entries);
-    int start = 0;
+    int start = paramCount;
     for (int i = paramCount + 1; i <= locals.length; i++) {
       if (i == locals.length || locals[i - 1].type != locals[i].type) {
         writeUnsigned(i - start);
@@ -188,6 +190,9 @@ class DefinedFunction extends BaseFunction
     s.writeBytes(data);
     s.writeBytes(body.data);
   }
+
+  @override
+  String toString() => exportedName ?? "#$index";
 }
 
 class Local {
@@ -195,6 +200,9 @@ class Local {
   final ValueType type;
 
   Local(this.index, this.type);
+
+  @override
+  String toString() => "$index";
 }
 
 abstract class Global {
@@ -238,6 +246,9 @@ class ImportedFunction extends BaseFunction implements Import {
     s.writeByte(0x00);
     s.writeUnsigned(type.index);
   }
+
+  @override
+  String toString() => "$module.$name";
 }
 
 class ImportedGlobal extends Global implements Import {

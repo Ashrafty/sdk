@@ -49,10 +49,10 @@ class Translator {
 
     FunctionCollector(this).collect();
 
-    mainFunction =
-        libraries.first.procedures.firstWhere((p) => p.name.name == "main");
-    w.DefinedFunction mainFun = functions[mainFunction] as w.DefinedFunction;
-    m.exportFunction("main", mainFun);
+    //mainFunction =
+    //    libraries.first.procedures.firstWhere((p) => p.name.name == "main");
+    //w.DefinedFunction mainFun = functions[mainFunction] as w.DefinedFunction;
+    //m.exportFunction("main", mainFun);
 
     Analyzer(this).visitComponent(component);
     var codeGen = CodeGenerator(this);
@@ -61,6 +61,7 @@ class Translator {
       if (function is w.DefinedFunction) {
         print(member);
         print(member.function.body);
+        m.exportFunction(member.toString(), function);
         codeGen.generate(member, function);
       }
     }

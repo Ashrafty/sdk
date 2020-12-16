@@ -47,8 +47,30 @@ class CodeGenerator extends Visitor<void> {
 
     this.function = function;
     b = function.body;
+    b.traceEnabled = true;
+    if (member is Constructor) visitList(member.initializers, this);
     member.function.body.accept(this);
     b.end();
+  }
+
+  void visitFieldInitializer(FieldInitializer node) {
+    w.StructType struct =
+        translator.classes[(node.parent as Constructor).enclosingClass]!.struct;
+    int fieldIndex = translator.fieldIndex[node.field]!;
+
+    b.local_get(thisLocal!);
+    node.value.accept(this);
+    b.struct_set(struct, fieldIndex);
+  }
+
+  void visitSuperInitializer(SuperInitializer node) {
+    if ((node.parent as Constructor).enclosingClass.superclass?.superclass ==
+        null) {
+      return;
+    }
+    b.local_get(thisLocal!);
+    node.arguments.accept(this);
+    b.call(translator.functions[node.target]!);
   }
 
   void visitBlock(Block node) {
@@ -194,8 +216,8 @@ class CodeGenerator extends Visitor<void> {
       node.receiver.accept(this);
       w.StructType struct = translator.classes[target.enclosingClass]!.struct;
       int fieldIndex = translator.fieldIndex[target]!;
-      b.rtt_canon(w.HeapType.def(struct));
-      b.ref_cast(w.HeapType.any, w.HeapType.def(struct));
+      //b.rtt_canon(w.HeapType.def(struct));
+      //b.ref_cast(w.HeapType.any, w.HeapType.def(struct));
       b.struct_get(struct, fieldIndex);
       return;
     }
@@ -209,8 +231,8 @@ class CodeGenerator extends Visitor<void> {
       node.receiver.accept(this);
       w.StructType struct = translator.classes[target.enclosingClass]!.struct;
       int fieldIndex = translator.fieldIndex[target]!;
-      b.rtt_canon(w.HeapType.def(struct));
-      b.ref_cast(w.HeapType.any, w.HeapType.def(struct));
+      //b.rtt_canon(w.HeapType.def(struct));
+      //b.ref_cast(w.HeapType.any, w.HeapType.def(struct));
       w.Local temp = function.addLocal(struct.fields[fieldIndex].type.unpacked);
       node.value.accept(this);
       b.local_tee(temp);
