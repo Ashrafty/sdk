@@ -11,6 +11,7 @@ import 'package:dart2wasm/intrinsics.dart';
 import 'package:kernel/ast.dart';
 import 'package:kernel/core_types.dart';
 import 'package:kernel/type_environment.dart';
+import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
@@ -19,6 +20,7 @@ class Translator {
   List<Library> libraries;
   CoreTypes coreTypes;
   TypeEnvironment typeEnvironment;
+  //TableSelectorAssigner tableSelectorAssigner;
 
   late Intrinsics intrinsics;
 
@@ -28,7 +30,10 @@ class Translator {
   late Procedure mainFunction;
   late w.Module m;
 
-  Translator(this.component, this.coreTypes, this.typeEnvironment)
+  Translator(this.component, this.coreTypes,
+      this.typeEnvironment /*,
+      this.tableSelectorAssigner*/
+      )
       : libraries = [component.libraries.first] {
     intrinsics = Intrinsics(this);
   }

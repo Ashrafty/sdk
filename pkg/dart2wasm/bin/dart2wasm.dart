@@ -37,6 +37,7 @@ import 'package:kernel/type_environment.dart';
 
 import 'package:vm/kernel_front_end.dart';
 import 'package:vm/target/vm.dart';
+import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 
 import 'package:dart2wasm/translator.dart';
 
@@ -130,12 +131,18 @@ main(List<String> args) async {
     await runGlobalTransformations(
         target, component, true, false, false, false, ErrorDetector(),
         minimalKernel: true);
+  //final tableSelectorAssigner = new TableSelectorAssigner(component);
 
   print(component.libraries
       .map((l) => "${l.name}: ${l.classes.length} ${l.members.length}")
       .toList());
 
-  var translator = Translator(component, compilerResult.coreTypes,
-      TypeEnvironment(compilerResult.coreTypes, compilerResult.classHierarchy));
+  var translator = Translator(
+      component,
+      compilerResult.coreTypes,
+      TypeEnvironment(compilerResult.coreTypes,
+          compilerResult.classHierarchy) /*,
+      tableSelectorAssigner*/
+      );
   File(args[1]).writeAsBytesSync(translator.translate().encode());
 }

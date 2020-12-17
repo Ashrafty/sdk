@@ -9,7 +9,8 @@ import '../lib/wasm_builder.dart';
 
 main(List<String> args) {
   Module m = Module();
-  var ftype = m.addFunctionType([NumType.f64, NumType.f64], [NumType.f64]);
+  var ftype =
+      m.addFunctionType([NumType.f64, NumType.f64], [NumType.f64, NumType.f64]);
   var printtype = m.addFunctionType([NumType.f64], []);
 
   var printNum = m.importFunction('console', 'log', printtype);
@@ -45,6 +46,7 @@ main(List<String> args) {
   b.end();
   b.end();
   b.local_get(sumVar);
+  b.f64_const(2);
   b.end();
 
   File(args[0]).writeAsBytesSync(m.encode());

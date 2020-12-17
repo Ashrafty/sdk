@@ -25,6 +25,10 @@ class CodeGenerator extends Visitor<void> {
 
   CodeGenerator(this.translator);
 
+  void defaultNode(Node node) {
+    throw "Not supported: ${node.runtimeType}";
+  }
+
   void defaultTreeNode(TreeNode node) {
     throw "Not supported: ${node.runtimeType}";
   }
@@ -40,7 +44,6 @@ class CodeGenerator extends Visitor<void> {
     List<VariableDeclaration> params = member.function.positionalParameters;
     int implicitParams = function.locals.length - params.length;
     assert(implicitParams == 0 || implicitParams == 1);
-    thisLocal = implicitParams == 1 ? function.locals[0] : null;
     for (int i = 0; i < params.length; i++) {
       locals[params[i]] = function.locals[implicitParams + i];
     }
@@ -48,7 +51,20 @@ class CodeGenerator extends Visitor<void> {
     this.function = function;
     b = function.body;
     b.traceEnabled = true;
-    if (member is Constructor) visitList(member.initializers, this);
+    if (member is Constructor) {
+      thisLocal = function.locals[0];
+      visitList(member.initializers, this);
+    } else if (implicitParams == 1) {
+      ClassInfo info = translator.classes[member.enclosingClass]!;
+      thisLocal = function.addLocal(info.repr);
+      b.local_get(function.locals[0]);
+      b.rtt_canon(w.HeapType.def(info.struct));
+      //b.global_get(info.rtt);
+      b.ref_cast(w.HeapType.any, w.HeapType.def(info.struct));
+      b.local_set(thisLocal!);
+    } else {
+      thisLocal = null;
+    }
     member.function.body.accept(this);
     b.end();
   }
@@ -74,6 +90,10 @@ class CodeGenerator extends Visitor<void> {
   }
 
   void visitBlock(Block node) {
+    node.visitChildren(this);
+  }
+
+  void visitBlockExpression(BlockExpression node) {
     node.visitChildren(this);
   }
 
@@ -157,8 +177,12 @@ class CodeGenerator extends Visitor<void> {
     ClassInfo info = translator.classes[node.target.enclosingClass]!;
     w.Local temp = function.addLocal(info.repr);
     b.rtt_canon(w.HeapType.def(info.struct));
+    //b.global_get(info.rtt);
     b.struct_new_default_with_rtt(info.struct);
     b.local_tee(temp);
+    b.i32_const(info.classId);
+    b.struct_set(info.struct, 0);
+    b.local_get(temp);
     node.arguments.accept(this);
     b.call(translator.functions[node.target]!);
     b.local_get(temp);
@@ -172,9 +196,18 @@ class CodeGenerator extends Visitor<void> {
 
   void visitMethodInvocation(MethodInvocation node) {
     node.receiver.accept(this);
-    node.arguments.accept(this);
     Member target = node.interfaceTarget;
-    if (target is Procedure && target.kind == ProcedureKind.Operator) {
+    if (target is! Procedure) {
+      throw "Unsupported invocation of $target";
+    }
+    if (target.kind == ProcedureKind.Operator) {
+      if (target.name.name == '==') {
+        if (node.arguments.positional[0] is NullLiteral) {
+          b.ref_is_null();
+          return;
+        }
+      }
+      node.arguments.accept(this);
       Intrinsic? intrinsic =
           translator.intrinsics.getOperatorIntrinsic(node, this);
       if (intrinsic != null) {
@@ -182,10 +215,15 @@ class CodeGenerator extends Visitor<void> {
         return;
       }
     }
+    _virtualCall(target, node.arguments);
+  }
+
+  void _virtualCall(Procedure interfaceTarget, Arguments arguments) {
     // TODO: Virtual calls
-    w.BaseFunction? function = translator.functions[target];
+    arguments.accept(this);
+    w.BaseFunction? function = translator.functions[interfaceTarget];
     if (function == null) {
-      throw "No known target for $node";
+      throw "No known target for $interfaceTarget";
     }
     b.call(function);
   }
@@ -220,8 +258,12 @@ class CodeGenerator extends Visitor<void> {
       //b.ref_cast(w.HeapType.any, w.HeapType.def(struct));
       b.struct_get(struct, fieldIndex);
       return;
+    } else if (target is Procedure && target.isGetter) {
+      node.receiver.accept(this);
+      _virtualCall(target, Arguments([]));
+      return;
     }
-    throw "PropertyGet of non-Field $target not supported";
+    throw "PropertyGet of non-Field/Getter $target not supported";
   }
 
   @override
@@ -255,6 +297,22 @@ class CodeGenerator extends Visitor<void> {
     b.end();
   }
 
+  void visitNot(Not node) {
+    node.operand.accept(this);
+    b.i32_eqz();
+  }
+
+  void visitConditionalExpression(ConditionalExpression node) {
+    w.ValueType type =
+        translator.translateType(node.getStaticType(typeContext));
+    node.condition.accept(this);
+    b.if_([], [type]);
+    node.then.accept(this);
+    b.else_();
+    node.otherwise.accept(this);
+    b.end();
+  }
+
   void visitNullCheck(NullCheck node) {
     node.operand.accept(this);
   }
@@ -264,8 +322,20 @@ class CodeGenerator extends Visitor<void> {
     visitList(node.named.map((n) => n.value).toList(), this);
   }
 
+  void visitConstantExpression(ConstantExpression node) {
+    node.constant.accept(this);
+  }
+
   void visitIntLiteral(IntLiteral node) {
     b.i64_const(node.value);
+  }
+
+  void visitIntConstant(IntConstant node) {
+    b.i64_const(node.value);
+  }
+
+  void visitDoubleLiteral(DoubleLiteral node) {
+    b.f64_const(node.value);
   }
 
   void visitNullLiteral(NullLiteral node) {

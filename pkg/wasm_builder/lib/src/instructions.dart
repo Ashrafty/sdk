@@ -289,12 +289,12 @@ class Instructions with SerializerMixin {
     writeUnsigned(function.index);
   }
 
-  void call_indirect(FunctionType type) {
+  void call_indirect(FunctionType type, [Table? table]) {
     assert(_verifyTypes([...type.inputs, NumType.i32], type.outputs,
         trace: ['call_indirect', type]));
     writeByte(0x11);
     writeUnsigned(type.index);
-    writeByte(0x00);
+    writeUnsigned(table?.index ?? 0);
   }
 
   // Parametric instructions
@@ -563,8 +563,8 @@ class Instructions with SerializerMixin {
     assert(_verifyTypes([Rtt(superType, depth)], [Rtt(subType, depth + 1)],
         trace: ['rtt.sub', superType, subType]));
     writeBytes(const [0xFB, 0x31]);
-    writeUnsigned(depth);
-    write(superType);
+    //writeUnsigned(depth);
+    //write(superType);
     write(subType);
   }
 

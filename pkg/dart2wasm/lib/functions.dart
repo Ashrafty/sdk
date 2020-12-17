@@ -8,6 +8,11 @@ import 'package:kernel/ast.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+//class SelectorInfo {
+//  int offset;
+//  w.FunctionType signature;
+//}
+
 class FunctionCollector extends MemberVisitor<void> {
   Translator translator;
   w.Module m;
@@ -29,16 +34,20 @@ class FunctionCollector extends MemberVisitor<void> {
 
   void visitProcedure(Procedure node) {
     if (!node.isAbstract) {
-      _makeFunction(node, node.function.returnType, node.isInstanceMember);
+      DartType? receiverType = node.isInstanceMember
+          ? translator.coreTypes.objectRawType(Nullability.nonNullable)
+          : null;
+      _makeFunction(node, node.function.returnType, receiverType);
     }
   }
 
   void visitConstructor(Constructor node) {
-    _makeFunction(node, VoidType(), true);
+    _makeFunction(node, VoidType(),
+        InterfaceType(node.enclosingClass!, Nullability.nonNullable));
   }
 
   void _makeFunction(
-      Member member, DartType returnType, bool receiverParameter) {
+      Member member, DartType returnType, DartType? receiverType) {
     if (translator.functions.containsKey(member)) return;
 
     FunctionNode function = member.function;
@@ -49,9 +58,7 @@ class FunctionCollector extends MemberVisitor<void> {
     }
 
     List<w.ValueType> inputs = [];
-    if (receiverParameter) {
-      DartType receiverType =
-          InterfaceType(member.enclosingClass!, Nullability.nonNullable);
+    if (receiverType != null) {
       inputs.add(translator.translateType(receiverType));
     }
     inputs.addAll(function.positionalParameters

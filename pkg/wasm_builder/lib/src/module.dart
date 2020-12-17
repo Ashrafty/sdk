@@ -13,6 +13,7 @@ class Module with SerializerMixin {
 
   List<DefType> defTypes = [];
   List<BaseFunction> functions = [];
+  List<Table> tables = [];
   List<Global> globals = [];
   List<Export> exports = [];
   BaseFunction? startFunction = null;
@@ -54,6 +55,12 @@ class Module with SerializerMixin {
     final function = DefinedFunction(this, functions.length, type);
     functions.add(function);
     return function;
+  }
+
+  Table addTable(int minSize, int? maxSize) {
+    final table = Table(tables.length, minSize, maxSize);
+    tables.add(table);
+    return table;
   }
 
   DefinedGlobal addGlobal(GlobalType type) {
@@ -205,11 +212,41 @@ class Local {
   String toString() => "$index";
 }
 
+class Table implements Serializable {
+  int index;
+  int minSize;
+  int? maxSize;
+  List<BaseFunction?> elements;
+
+  Table(this.index, this.minSize, this.maxSize)
+      : elements = List.filled(minSize, null);
+
+  void setElement(int index, BaseFunction function) {
+    elements[index] = function;
+  }
+
+  @override
+  void serialize(Serializer s) {
+    s.writeByte(0x70); // funcref
+    if (maxSize == null) {
+      s.writeByte(0x00);
+      s.writeUnsigned(minSize);
+    } else {
+      s.writeByte(0x01);
+      s.writeUnsigned(minSize);
+      s.writeUnsigned(maxSize!);
+    }
+  }
+}
+
 abstract class Global {
   final int index;
   final GlobalType type;
 
   Global(this.index, this.type);
+
+  @override
+  String toString() => "$index";
 }
 
 class DefinedGlobal extends Global implements Serializable {
@@ -355,6 +392,18 @@ class FunctionSection extends Section {
   }
 }
 
+class TableSection extends Section {
+  TableSection(Module module) : super(module);
+
+  @override
+  int get id => 4;
+
+  @override
+  void serializeContents() {
+    writeList(module.tables);
+  }
+}
+
 class GlobalSection extends Section {
   GlobalSection(Module module) : super(module);
 
@@ -388,6 +437,53 @@ class StartSection extends Section {
   @override
   void serializeContents() {
     writeUnsigned(module.startFunction!.index);
+  }
+}
+
+class _Element implements Serializable {
+  Table table;
+  int startIndex;
+  List<BaseFunction> entries = [];
+
+  _Element(this.table, this.startIndex);
+
+  @override
+  void serialize(Serializer s) {
+    s.writeUnsigned(table.index);
+    s.writeByte(0x41); // i32.const
+    s.writeSigned(startIndex);
+    s.writeByte(0x0B); // end
+    s.writeUnsigned(entries.length);
+    for (var entry in entries) {
+      s.writeUnsigned(entry.index);
+    }
+  }
+}
+
+class ElementSection extends Section {
+  ElementSection(Module module) : super(module);
+
+  @override
+  int get id => 9;
+
+  @override
+  void serializeContents() {
+    List<_Element> elements = [];
+    for (Table table in module.tables) {
+      _Element? current = null;
+      for (int i = 0; i < table.elements.length; i++) {
+        BaseFunction? function = table.elements[i];
+        if (function != null) {
+          if (current == null) {
+            current = _Element(table, i);
+          }
+          current.entries.add(function);
+        } else {
+          current = null;
+        }
+      }
+    }
+    writeList(elements);
   }
 }
 

@@ -11,11 +11,13 @@ typedef Intrinsic = void Function(CodeGenerator codeGen);
 class Intrinsics {
   Translator translator;
 
-  late Map<DartType, Map<String, Map<DartType, Intrinsic>>> operatorMap;
+  late Map<DartType, Map<String, Map<DartType, Intrinsic>>> binaryOperatorMap;
+  late Map<DartType, Map<String, Intrinsic>> unaryOperatorMap;
 
   Intrinsics(this.translator) {
     DartType i = translator.coreTypes.intRawType(Nullability.nonNullable);
-    operatorMap = {
+    DartType d = translator.coreTypes.doubleRawType(Nullability.nonNullable);
+    binaryOperatorMap = {
       i: {
         '+': {i: (c) => c.b.i64_add()},
         '-': {i: (c) => c.b.i64_sub()},
@@ -30,6 +32,26 @@ class Intrinsics {
         '<=': {i: (c) => c.b.i64_le_s()},
         '>': {i: (c) => c.b.i64_gt_s()},
         '>=': {i: (c) => c.b.i64_ge_s()},
+      },
+      d: {
+        '+': {d: (c) => c.b.f64_add()},
+        '-': {d: (c) => c.b.f64_sub()},
+        '*': {d: (c) => c.b.f64_mul()},
+        '/': {d: (c) => c.b.f64_div()},
+        '==': {d: (c) => c.b.f64_eq()},
+        '<': {d: (c) => c.b.f64_lt()},
+        '<=': {d: (c) => c.b.f64_le()},
+        '>': {d: (c) => c.b.f64_gt()},
+        '>=': {d: (c) => c.b.f64_ge()},
+      }
+    };
+
+    unaryOperatorMap = {
+      i: {
+        'unary-': (c) {
+          c.b.i64_const(-1);
+          c.b.i64_mul();
+        }
       }
     };
   }
@@ -39,8 +61,15 @@ class Intrinsics {
     DartType receiverType =
         invocation.receiver.getStaticType(codeGen.typeContext);
     String name = invocation.name.name;
-    DartType argType =
-        invocation.arguments.positional[0].getStaticType(codeGen.typeContext);
-    return operatorMap[receiverType]?[name]?[argType];
+    if (invocation.arguments.positional.length == 1) {
+      // Binary operator
+      DartType argType =
+          invocation.arguments.positional[0].getStaticType(codeGen.typeContext);
+      return binaryOperatorMap[receiverType]?[name]?[argType];
+    } else {
+      assert(invocation.arguments.positional.length == 0);
+      // Unary operator
+      return unaryOperatorMap[receiverType]?[name];
+    }
   }
 }
