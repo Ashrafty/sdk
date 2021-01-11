@@ -194,19 +194,13 @@ class CodeGenerator extends Visitor<void> {
     b.call(target);
   }
 
-  void visitMethodInvocation(MethodInvocation node) {
+  void visitInstanceInvocation(InstanceInvocation node) {
     node.receiver.accept(this);
     Member target = node.interfaceTarget;
     if (target is! Procedure) {
       throw "Unsupported invocation of $target";
     }
     if (target.kind == ProcedureKind.Operator) {
-      if (target.name.name == '==') {
-        if (node.arguments.positional[0] is NullLiteral) {
-          b.ref_is_null();
-          return;
-        }
-      }
       node.arguments.accept(this);
       Intrinsic? intrinsic =
           translator.intrinsics.getOperatorIntrinsic(node, this);
@@ -216,6 +210,27 @@ class CodeGenerator extends Visitor<void> {
       }
     }
     _virtualCall(target, node.arguments);
+  }
+
+  void visitEqualsCall(EqualsCall node) {
+    Intrinsic? intrinsic = translator.intrinsics.getEqualsIntrinsic(node, this);
+    if (intrinsic != null) {
+      node.left.accept(this);
+      node.right.accept(this);
+      intrinsic(this);
+      return;
+    }
+    throw "EqualsCall of types "
+        "${node.left.getStaticType(typeContext)} and "
+        "${node.right.getStaticType(typeContext)} not supported";
+  }
+
+  void visitEqualsNull(EqualsNull node) {
+    node.expression.accept(this);
+    b.ref_is_null();
+    if (node.isNot) {
+      b.i32_eqz();
+    }
   }
 
   void _virtualCall(Procedure interfaceTarget, Arguments arguments) {
@@ -248,7 +263,7 @@ class CodeGenerator extends Visitor<void> {
   }
 
   @override
-  void visitPropertyGet(PropertyGet node) {
+  void visitInstanceGet(InstanceGet node) {
     Member target = node.interfaceTarget;
     if (target is Field) {
       node.receiver.accept(this);
@@ -263,11 +278,11 @@ class CodeGenerator extends Visitor<void> {
       _virtualCall(target, Arguments([]));
       return;
     }
-    throw "PropertyGet of non-Field/Getter $target not supported";
+    throw "InstanceGet of non-Field/Getter $target not supported";
   }
 
   @override
-  void visitPropertySet(PropertySet node) {
+  void visitInstanceSet(InstanceSet node) {
     Member target = node.interfaceTarget;
     if (target is Field) {
       node.receiver.accept(this);
@@ -345,7 +360,7 @@ class CodeGenerator extends Visitor<void> {
       type = parent.type;
     } else if (parent is VariableSet) {
       type = parent.variable.type;
-    } else if (parent is PropertySet) {
+    } else if (parent is InstanceSet) {
       Member target = parent.interfaceTarget;
       type = target is Field
           ? target.type

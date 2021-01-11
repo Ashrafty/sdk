@@ -101,6 +101,9 @@ class WasmTarget extends Target {
 
   @override
   bool enableNative(Uri uri) => true;
+
+  @override
+  bool get supportsNewMethodInvocationEncoding => true;
 }
 
 main(List<String> args) async {

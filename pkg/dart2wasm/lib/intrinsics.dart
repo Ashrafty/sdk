@@ -9,55 +9,86 @@ import 'package:kernel/ast.dart';
 typedef Intrinsic = void Function(CodeGenerator codeGen);
 
 class Intrinsics {
-  Translator translator;
+  final Translator translator;
+  final DartType intType;
+  final DartType doubleType;
 
-  late Map<DartType, Map<String, Map<DartType, Intrinsic>>> binaryOperatorMap;
-  late Map<DartType, Map<String, Intrinsic>> unaryOperatorMap;
+  late final Map<DartType, Map<String, Map<DartType, Intrinsic>>>
+      binaryOperatorMap;
+  late final Map<DartType, Map<String, Intrinsic>> unaryOperatorMap;
+  late final Map<DartType, Map<DartType, Map<bool, Intrinsic>>> equalsMap;
 
-  Intrinsics(this.translator) {
-    DartType i = translator.coreTypes.intRawType(Nullability.nonNullable);
-    DartType d = translator.coreTypes.doubleRawType(Nullability.nonNullable);
+  // Meaning of the `isNot` field of `EqualsCall`
+  static const bool isEquals = false;
+  static const bool isNotEquals = true;
+
+  Intrinsics(this.translator)
+      : intType = translator.coreTypes.intRawType(Nullability.nonNullable),
+        doubleType =
+            translator.coreTypes.doubleRawType(Nullability.nonNullable) {
     binaryOperatorMap = {
-      i: {
-        '+': {i: (c) => c.b.i64_add()},
-        '-': {i: (c) => c.b.i64_sub()},
-        '*': {i: (c) => c.b.i64_mul()},
-        '~/': {i: (c) => c.b.i64_div_s()},
-        '%': {i: (c) => c.b.i64_rem_s()},
-        '&': {i: (c) => c.b.i64_and()},
-        '|': {i: (c) => c.b.i64_or()},
-        '^': {i: (c) => c.b.i64_xor()},
-        '==': {i: (c) => c.b.i64_eq()},
-        '<': {i: (c) => c.b.i64_lt_s()},
-        '<=': {i: (c) => c.b.i64_le_s()},
-        '>': {i: (c) => c.b.i64_gt_s()},
-        '>=': {i: (c) => c.b.i64_ge_s()},
+      intType: {
+        '+': {intType: (c) => c.b.i64_add()},
+        '-': {intType: (c) => c.b.i64_sub()},
+        '*': {intType: (c) => c.b.i64_mul()},
+        '~/': {intType: (c) => c.b.i64_div_s()},
+        '%': {intType: (c) => c.b.i64_rem_s()},
+        '&': {intType: (c) => c.b.i64_and()},
+        '|': {intType: (c) => c.b.i64_or()},
+        '^': {intType: (c) => c.b.i64_xor()},
+        '<': {intType: (c) => c.b.i64_lt_s()},
+        '<=': {intType: (c) => c.b.i64_le_s()},
+        '>': {intType: (c) => c.b.i64_gt_s()},
+        '>=': {intType: (c) => c.b.i64_ge_s()},
       },
-      d: {
-        '+': {d: (c) => c.b.f64_add()},
-        '-': {d: (c) => c.b.f64_sub()},
-        '*': {d: (c) => c.b.f64_mul()},
-        '/': {d: (c) => c.b.f64_div()},
-        '==': {d: (c) => c.b.f64_eq()},
-        '<': {d: (c) => c.b.f64_lt()},
-        '<=': {d: (c) => c.b.f64_le()},
-        '>': {d: (c) => c.b.f64_gt()},
-        '>=': {d: (c) => c.b.f64_ge()},
+      doubleType: {
+        '+': {doubleType: (c) => c.b.f64_add()},
+        '-': {doubleType: (c) => c.b.f64_sub()},
+        '*': {doubleType: (c) => c.b.f64_mul()},
+        '/': {doubleType: (c) => c.b.f64_div()},
+        '<': {doubleType: (c) => c.b.f64_lt()},
+        '<=': {doubleType: (c) => c.b.f64_le()},
+        '>': {doubleType: (c) => c.b.f64_gt()},
+        '>=': {doubleType: (c) => c.b.f64_ge()},
       }
     };
 
     unaryOperatorMap = {
-      i: {
+      intType: {
         'unary-': (c) {
           c.b.i64_const(-1);
           c.b.i64_mul();
+        },
+        '~': (c) {
+          c.b.i64_const(-1);
+          c.b.i64_xor();
+        },
+      },
+      doubleType: {
+        'unary-': (c) {
+          c.b.f64_neg();
+        },
+      },
+    };
+
+    equalsMap = {
+      intType: {
+        intType: {
+          isEquals: (c) => c.b.i64_eq(),
+          isNotEquals: (c) => c.b.i64_ne(),
         }
-      }
+      },
+      doubleType: {
+        doubleType: {
+          isEquals: (c) => c.b.f64_eq(),
+          isNotEquals: (c) => c.b.f64_ne(),
+        }
+      },
     };
   }
 
   Intrinsic? getOperatorIntrinsic(
-      MethodInvocation invocation, CodeGenerator codeGen) {
+      InstanceInvocation invocation, CodeGenerator codeGen) {
     DartType receiverType =
         invocation.receiver.getStaticType(codeGen.typeContext);
     String name = invocation.name.name;
@@ -71,5 +102,11 @@ class Intrinsics {
       // Unary operator
       return unaryOperatorMap[receiverType]?[name];
     }
+  }
+
+  Intrinsic? getEqualsIntrinsic(EqualsCall node, CodeGenerator codeGen) {
+    DartType leftType = node.left.getStaticType(codeGen.typeContext);
+    DartType rightType = node.right.getStaticType(codeGen.typeContext);
+    return equalsMap[leftType]?[rightType]?[node.isNot];
   }
 }
