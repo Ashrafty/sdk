@@ -50,7 +50,6 @@ class CodeGenerator extends Visitor<void> {
 
     this.function = function;
     b = function.body;
-    b.traceEnabled = true;
     if (member is Constructor) {
       thisLocal = function.locals[0];
       visitList(member.initializers, this);
@@ -67,6 +66,7 @@ class CodeGenerator extends Visitor<void> {
     }
     member.function.body.accept(this);
     b.end();
+    print(b.trace);
   }
 
   void visitFieldInitializer(FieldInitializer node) {

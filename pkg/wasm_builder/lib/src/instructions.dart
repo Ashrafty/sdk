@@ -74,8 +74,10 @@ class Instructions with SerializerMixin {
   final Module module;
   final List<Local> locals;
 
-  bool traceEnabled = false;
+  bool traceEnabled = true;
+  int instructionColumnWidth = 50;
   int _indent = 0;
+  List<String> _traceLines = [];
 
   int labelIndex = 0;
   final List<Label> labelStack = [];
@@ -88,18 +90,25 @@ class Instructions with SerializerMixin {
 
   bool get isComplete => labelStack.isEmpty;
 
+  String get trace => _traceLines.join();
+
   void _debugTrace(List<Object> trace,
       {int indentBefore = 0, int indentAfter = 0}) {
     if (traceEnabled) {
       _indent += indentBefore;
-      print(("  " * _indent + trace.join(" ")).padRight(40) +
-          stackTypes.join(', '));
+      String instr = "  " * _indent + trace.join(" ");
+      instr = instr.length > instructionColumnWidth - 2
+          ? instr.substring(0, instructionColumnWidth - 4) + "... "
+          : instr.padRight(instructionColumnWidth);
+      String line = "$instr${stackTypes.join(', ')}\n";
       _indent += indentAfter;
+
+      _traceLines.add(line);
     }
   }
 
-  void _reportError(String error) {
-    throw error;
+  Never _reportError(String error) {
+    throw "$trace\n$error";
   }
 
   void _checkStackTypes(List<ValueType> inputs) {
@@ -165,13 +174,13 @@ class Instructions with SerializerMixin {
 
   void unreachable() {
     assert(_verifyTypes(const [], const [],
-        allowUnreachable: true, trace: ['nop']));
+        allowUnreachable: true, trace: const ['nop']));
     reachable = false;
     writeByte(0x00);
   }
 
   void nop() {
-    assert(_verifyTypes(const [], const [], trace: ['nop']));
+    assert(_verifyTypes(const [], const [], trace: const ['nop']));
     writeByte(0x01);
   }
 
@@ -198,23 +207,24 @@ class Instructions with SerializerMixin {
 
   Label block(
       [List<ValueType> inputs = const [], List<ValueType> outputs = const []]) {
-    return _beginBlock(0x02, Block(inputs, outputs), trace: ['block']);
+    return _beginBlock(0x02, Block(inputs, outputs), trace: const ['block']);
   }
 
   Label loop(
       [List<ValueType> inputs = const [], List<ValueType> outputs = const []]) {
-    return _beginBlock(0x03, Loop(inputs, outputs), trace: ['loop']);
+    return _beginBlock(0x03, Loop(inputs, outputs), trace: const ['loop']);
   }
 
   Label if_(
       [List<ValueType> inputs = const [], List<ValueType> outputs = const []]) {
     assert(_verifyTypes(const [NumType.i32], const []));
-    return _beginBlock(0x04, If(inputs, outputs), trace: ['if']);
+    return _beginBlock(0x04, If(inputs, outputs), trace: const ['if']);
   }
 
   void else_() {
     If label = labelStack.last as If;
-    assert(_verifyEndOfBlock(label.inputs, trace: ['else'], reindent: true));
+    assert(
+        _verifyEndOfBlock(label.inputs, trace: const ['else'], reindent: true));
     label.hasElse = true;
     if (reachable) label.markJump();
     reachable = true;
@@ -223,7 +233,7 @@ class Instructions with SerializerMixin {
 
   void end() {
     assert(_verifyEndOfBlock(labelStack.last.outputs,
-        trace: ['end'], reindent: false));
+        trace: const ['end'], reindent: false));
     reachable |= labelStack.last.jumpToEnd;
     labelStack.removeLast();
     writeByte(0x0B);
@@ -277,7 +287,8 @@ class Instructions with SerializerMixin {
   }
 
   void return_() {
-    assert(_verifyTypes(labelStack[0].outputs, const [], trace: ['return']));
+    assert(
+        _verifyTypes(labelStack[0].outputs, const [], trace: const ['return']));
     reachable = false;
     writeByte(0x0F);
   }
@@ -300,15 +311,26 @@ class Instructions with SerializerMixin {
   // Parametric instructions
 
   void drop() {
-    assert(_verifyTypes([stackTypes.last], const [], trace: ['drop']));
+    assert(_verifyTypes([stackTypes.last], const [], trace: const ['drop']));
     writeByte(0x1A);
   }
 
-  void select() {
+  void select([ValueType? type]) {
     assert(_verifyTypes(const [NumType.i32], const []));
-    assert(_verifyTypes([stackTypes.last, stackTypes.last], [stackTypes.last],
-        trace: ['select']));
-    writeByte(0x1B);
+    if (type != null) {
+      assert(_verifyTypes([type, type], [type], trace: ['select', type]));
+      writeByte(0x1C);
+      writeUnsigned(1);
+      write(type);
+    } else {
+      type = stackTypes.last;
+      assert(type is NumType ||
+          _reportError(
+              "Input to implicitly typed select instruction must be a numtype"
+              " (was $type)"));
+      assert(_verifyTypes([type, type], [type], trace: const ['select']));
+      writeByte(0x1B);
+    }
   }
 
   // Variable instructions
@@ -363,7 +385,7 @@ class Instructions with SerializerMixin {
 
   void ref_is_null() {
     assert(_verifyTypes([RefType.any()], const [NumType.i32],
-        trace: ['ref.is_null']));
+        trace: const ['ref.is_null']));
     writeByte(0xD1);
   }
 
@@ -377,7 +399,7 @@ class Instructions with SerializerMixin {
   void ref_as_non_null() {
     assert(_verifyTypes(
         [RefType.any()], [stackTypes.last.withNullability(false)],
-        trace: ['ref.as_non_null']));
+        trace: const ['ref.as_non_null']));
     writeByte(0xD3);
   }
 
@@ -399,7 +421,7 @@ class Instructions with SerializerMixin {
 
   void ref_eq() {
     assert(_verifyTypes([RefType.eq(), RefType.eq()], const [NumType.i32],
-        trace: ['ref.eq']));
+        trace: const ['ref.eq']));
     writeByte(0xD5);
   }
 
@@ -535,20 +557,20 @@ class Instructions with SerializerMixin {
   }
 
   void i31_new() {
-    assert(
-        _verifyTypes(const [NumType.i32], [RefType.i31()], trace: ['i31.new']));
+    assert(_verifyTypes(const [NumType.i32], [RefType.i31()],
+        trace: const ['i31.new']));
     writeBytes(const [0xFB, 0x20]);
   }
 
   void i31_get_s() {
     assert(_verifyTypes([RefType.i31()], const [NumType.i32],
-        trace: ['i31.get_s']));
+        trace: const ['i31.get_s']));
     writeBytes(const [0xFB, 0x21]);
   }
 
   void i31_get_u() {
     assert(_verifyTypes([RefType.i31()], const [NumType.i32],
-        trace: ['i31.get_u']));
+        trace: const ['i31.get_u']));
     writeBytes(const [0xFB, 0x22]);
   }
 
@@ -631,817 +653,817 @@ class Instructions with SerializerMixin {
 
   void i32_eqz() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
-        trace: ['i32.eqz']));
+        trace: const ['i32.eqz']));
     writeByte(0x45);
   }
 
   void i32_eq() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.eq']));
+        trace: const ['i32.eq']));
     writeByte(0x46);
   }
 
   void i32_ne() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.ne']));
+        trace: const ['i32.ne']));
     writeByte(0x47);
   }
 
   void i32_lt_s() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.lt_s']));
+        trace: const ['i32.lt_s']));
     writeByte(0x48);
   }
 
   void i32_lt_u() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.lt_u']));
+        trace: const ['i32.lt_u']));
     writeByte(0x49);
   }
 
   void i32_gt_s() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.gt_s']));
+        trace: const ['i32.gt_s']));
     writeByte(0x4A);
   }
 
   void i32_gt_u() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.gt_u']));
+        trace: const ['i32.gt_u']));
     writeByte(0x4B);
   }
 
   void i32_le_s() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.le_s']));
+        trace: const ['i32.le_s']));
     writeByte(0x4C);
   }
 
   void i32_le_u() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.le_u']));
+        trace: const ['i32.le_u']));
     writeByte(0x4D);
   }
 
   void i32_ge_s() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.ge_s']));
+        trace: const ['i32.ge_s']));
     writeByte(0x4E);
   }
 
   void i32_ge_u() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.ge_u']));
+        trace: const ['i32.ge_u']));
     writeByte(0x4F);
   }
 
   void i64_eqz() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.i32],
-        trace: ['i64.eqz']));
+        trace: const ['i64.eqz']));
     writeByte(0x50);
   }
 
   void i64_eq() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.eq']));
+        trace: const ['i64.eq']));
     writeByte(0x51);
   }
 
   void i64_ne() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.ne']));
+        trace: const ['i64.ne']));
     writeByte(0x52);
   }
 
   void i64_lt_s() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.lt_s']));
+        trace: const ['i64.lt_s']));
     writeByte(0x53);
   }
 
   void i64_lt_u() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.lt_u']));
+        trace: const ['i64.lt_u']));
     writeByte(0x54);
   }
 
   void i64_gt_s() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.gt_s']));
+        trace: const ['i64.gt_s']));
     writeByte(0x55);
   }
 
   void i64_gt_u() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.gt_u']));
+        trace: const ['i64.gt_u']));
     writeByte(0x56);
   }
 
   void i64_le_s() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.le_s']));
+        trace: const ['i64.le_s']));
     writeByte(0x57);
   }
 
   void i64_le_u() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.le_u']));
+        trace: const ['i64.le_u']));
     writeByte(0x58);
   }
 
   void i64_ge_s() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.ge_s']));
+        trace: const ['i64.ge_s']));
     writeByte(0x59);
   }
 
   void i64_ge_u() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i32],
-        trace: ['i64.ge_u']));
+        trace: const ['i64.ge_u']));
     writeByte(0x5A);
   }
 
   void f32_eq() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32],
-        trace: ['f32.eq']));
+        trace: const ['f32.eq']));
     writeByte(0x5B);
   }
 
   void f32_ne() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32],
-        trace: ['f32.ne']));
+        trace: const ['f32.ne']));
     writeByte(0x5C);
   }
 
   void f32_lt() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32],
-        trace: ['f32.lt']));
+        trace: const ['f32.lt']));
     writeByte(0x5D);
   }
 
   void f32_gt() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32],
-        trace: ['f32.gt']));
+        trace: const ['f32.gt']));
     writeByte(0x5E);
   }
 
   void f32_le() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32],
-        trace: ['f32.le']));
+        trace: const ['f32.le']));
     writeByte(0x5F);
   }
 
   void f32_ge() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.i32],
-        trace: ['f32.ge']));
+        trace: const ['f32.ge']));
     writeByte(0x60);
   }
 
   void f64_eq() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32],
-        trace: ['f64.eq']));
+        trace: const ['f64.eq']));
     writeByte(0x61);
   }
 
   void f64_ne() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32],
-        trace: ['f64.ne']));
+        trace: const ['f64.ne']));
     writeByte(0x62);
   }
 
   void f64_lt() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32],
-        trace: ['f64.lt']));
+        trace: const ['f64.lt']));
     writeByte(0x63);
   }
 
   void f64_gt() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32],
-        trace: ['f64.gt']));
+        trace: const ['f64.gt']));
     writeByte(0x64);
   }
 
   void f64_le() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32],
-        trace: ['f64.le']));
+        trace: const ['f64.le']));
     writeByte(0x65);
   }
 
   void f64_ge() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.i32],
-        trace: ['f64.ge']));
+        trace: const ['f64.ge']));
     writeByte(0x66);
   }
 
   void i32_clz() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
-        trace: ['i32.clz']));
+        trace: const ['i32.clz']));
     writeByte(0x67);
   }
 
   void i32_ctz() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
-        trace: ['i32.ctz']));
+        trace: const ['i32.ctz']));
     writeByte(0x68);
   }
 
   void i32_popcnt() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
-        trace: ['i32.popcnt']));
+        trace: const ['i32.popcnt']));
     writeByte(0x69);
   }
 
   void i32_add() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.add']));
+        trace: const ['i32.add']));
     writeByte(0x6A);
   }
 
   void i32_sub() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.sub']));
+        trace: const ['i32.sub']));
     writeByte(0x6B);
   }
 
   void i32_mul() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.mul']));
+        trace: const ['i32.mul']));
     writeByte(0x6C);
   }
 
   void i32_div_s() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.div_s']));
+        trace: const ['i32.div_s']));
     writeByte(0x6D);
   }
 
   void i32_div_u() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.div_u']));
+        trace: const ['i32.div_u']));
     writeByte(0x6E);
   }
 
   void i32_rem_s() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.rem_s']));
+        trace: const ['i32.rem_s']));
     writeByte(0x6F);
   }
 
   void i32_rem_u() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.rem_u']));
+        trace: const ['i32.rem_u']));
     writeByte(0x70);
   }
 
   void i32_and() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.and']));
+        trace: const ['i32.and']));
     writeByte(0x71);
   }
 
   void i32_or() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.or']));
+        trace: const ['i32.or']));
     writeByte(0x72);
   }
 
   void i32_xor() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.xor']));
+        trace: const ['i32.xor']));
     writeByte(0x73);
   }
 
   void i32_shl() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.shl']));
+        trace: const ['i32.shl']));
     writeByte(0x74);
   }
 
   void i32_shr_s() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.shr_s']));
+        trace: const ['i32.shr_s']));
     writeByte(0x75);
   }
 
   void i32_shr_u() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.shr_u']));
+        trace: const ['i32.shr_u']));
     writeByte(0x76);
   }
 
   void i32_rotl() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.rotl']));
+        trace: const ['i32.rotl']));
     writeByte(0x77);
   }
 
   void i32_rotr() {
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [NumType.i32],
-        trace: ['i32.rotr']));
+        trace: const ['i32.rotr']));
     writeByte(0x78);
   }
 
   void i64_clz() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.i64],
-        trace: ['i64.clz']));
+        trace: const ['i64.clz']));
     writeByte(0x79);
   }
 
   void i64_ctz() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.i64],
-        trace: ['i64.ctz']));
+        trace: const ['i64.ctz']));
     writeByte(0x7A);
   }
 
   void i64_popcnt() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.i64],
-        trace: ['i64.popcnt']));
+        trace: const ['i64.popcnt']));
     writeByte(0x7B);
   }
 
   void i64_add() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.add']));
+        trace: const ['i64.add']));
     writeByte(0x7C);
   }
 
   void i64_sub() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.sub']));
+        trace: const ['i64.sub']));
     writeByte(0x7D);
   }
 
   void i64_mul() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.mul']));
+        trace: const ['i64.mul']));
     writeByte(0x7E);
   }
 
   void i64_div_s() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.div_s']));
+        trace: const ['i64.div_s']));
     writeByte(0x7F);
   }
 
   void i64_div_u() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.div_u']));
+        trace: const ['i64.div_u']));
     writeByte(0x80);
   }
 
   void i64_rem_s() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.rem_s']));
+        trace: const ['i64.rem_s']));
     writeByte(0x81);
   }
 
   void i64_rem_u() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.rem_u']));
+        trace: const ['i64.rem_u']));
     writeByte(0x82);
   }
 
   void i64_and() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.and']));
+        trace: const ['i64.and']));
     writeByte(0x83);
   }
 
   void i64_or() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.or']));
+        trace: const ['i64.or']));
     writeByte(0x84);
   }
 
   void i64_xor() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.xor']));
+        trace: const ['i64.xor']));
     writeByte(0x85);
   }
 
   void i64_shl() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.shl']));
+        trace: const ['i64.shl']));
     writeByte(0x86);
   }
 
   void i64_shr_s() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.shr_s']));
+        trace: const ['i64.shr_s']));
     writeByte(0x87);
   }
 
   void i64_shr_u() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.shr_u']));
+        trace: const ['i64.shr_u']));
     writeByte(0x88);
   }
 
   void i64_rotl() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.rotl']));
+        trace: const ['i64.rotl']));
     writeByte(0x89);
   }
 
   void i64_rotr() {
     assert(_verifyTypes(const [NumType.i64, NumType.i64], const [NumType.i64],
-        trace: ['i64.rotr']));
+        trace: const ['i64.rotr']));
     writeByte(0x8A);
   }
 
   void f32_abs() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.f32],
-        trace: ['f32.abs']));
+        trace: const ['f32.abs']));
     writeByte(0x8B);
   }
 
   void f32_neg() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.f32],
-        trace: ['f32.neg']));
+        trace: const ['f32.neg']));
     writeByte(0x8C);
   }
 
   void f32_ceil() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.f32],
-        trace: ['f32.ceil']));
+        trace: const ['f32.ceil']));
     writeByte(0x8D);
   }
 
   void f32_floor() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.f32],
-        trace: ['f32.floor']));
+        trace: const ['f32.floor']));
     writeByte(0x8E);
   }
 
   void f32_trunc() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.f32],
-        trace: ['f32.trunc']));
+        trace: const ['f32.trunc']));
     writeByte(0x8F);
   }
 
   void f32_nearest() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.f32],
-        trace: ['f32.nearest']));
+        trace: const ['f32.nearest']));
     writeByte(0x90);
   }
 
   void f32_sqrt() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.f32],
-        trace: ['f32.sqrt']));
+        trace: const ['f32.sqrt']));
     writeByte(0x91);
   }
 
   void f32_add() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32],
-        trace: ['f32.add']));
+        trace: const ['f32.add']));
     writeByte(0x92);
   }
 
   void f32_sub() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32],
-        trace: ['f32.sub']));
+        trace: const ['f32.sub']));
     writeByte(0x93);
   }
 
   void f32_mul() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32],
-        trace: ['f32.mul']));
+        trace: const ['f32.mul']));
     writeByte(0x94);
   }
 
   void f32_div() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32],
-        trace: ['f32.div']));
+        trace: const ['f32.div']));
     writeByte(0x95);
   }
 
   void f32_min() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32],
-        trace: ['f32.min']));
+        trace: const ['f32.min']));
     writeByte(0x96);
   }
 
   void f32_max() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32],
-        trace: ['f32.max']));
+        trace: const ['f32.max']));
     writeByte(0x97);
   }
 
   void f32_copysign() {
     assert(_verifyTypes(const [NumType.f32, NumType.f32], const [NumType.f32],
-        trace: ['f32.copysign']));
+        trace: const ['f32.copysign']));
     writeByte(0x98);
   }
 
   void f64_abs() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.f64],
-        trace: ['f64.abs']));
+        trace: const ['f64.abs']));
     writeByte(0x99);
   }
 
   void f64_neg() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.f64],
-        trace: ['f64.neg']));
+        trace: const ['f64.neg']));
     writeByte(0x9A);
   }
 
   void f64_ceil() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.f64],
-        trace: ['f64.ceil']));
+        trace: const ['f64.ceil']));
     writeByte(0x9B);
   }
 
   void f64_floor() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.f64],
-        trace: ['f64.floor']));
+        trace: const ['f64.floor']));
     writeByte(0x9C);
   }
 
   void f64_trunc() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.f64],
-        trace: ['f64.trunc']));
+        trace: const ['f64.trunc']));
     writeByte(0x9D);
   }
 
   void f64_nearest() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.f64],
-        trace: ['f64.nearest']));
+        trace: const ['f64.nearest']));
     writeByte(0x9E);
   }
 
   void f64_sqrt() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.f64],
-        trace: ['f64.sqrt']));
+        trace: const ['f64.sqrt']));
     writeByte(0x9F);
   }
 
   void f64_add() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64],
-        trace: ['f64.add']));
+        trace: const ['f64.add']));
     writeByte(0xA0);
   }
 
   void f64_sub() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64],
-        trace: ['f64.sub']));
+        trace: const ['f64.sub']));
     writeByte(0xA1);
   }
 
   void f64_mul() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64],
-        trace: ['f64.mul']));
+        trace: const ['f64.mul']));
     writeByte(0xA2);
   }
 
   void f64_div() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64],
-        trace: ['f64.div']));
+        trace: const ['f64.div']));
     writeByte(0xA3);
   }
 
   void f64_min() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64],
-        trace: ['f64.min']));
+        trace: const ['f64.min']));
     writeByte(0xA4);
   }
 
   void f64_max() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64],
-        trace: ['f64.max']));
+        trace: const ['f64.max']));
     writeByte(0xA5);
   }
 
   void f64_copysign() {
     assert(_verifyTypes(const [NumType.f64, NumType.f64], const [NumType.f64],
-        trace: ['f64.copysign']));
+        trace: const ['f64.copysign']));
     writeByte(0xA6);
   }
 
   void i32_wrap_i64() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.i32],
-        trace: ['i32.wrap_i64']));
+        trace: const ['i32.wrap_i64']));
     writeByte(0xA7);
   }
 
   void i32_trunc_f32_s() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.i32],
-        trace: ['i32.trunc_f32_s']));
+        trace: const ['i32.trunc_f32_s']));
     writeByte(0xA8);
   }
 
   void i32_trunc_f32_u() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.i32],
-        trace: ['i32.trunc_f32_u']));
+        trace: const ['i32.trunc_f32_u']));
     writeByte(0xA9);
   }
 
   void i32_trunc_f64_s() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.i32],
-        trace: ['i32.trunc_f64_s']));
+        trace: const ['i32.trunc_f64_s']));
     writeByte(0xAA);
   }
 
   void i32_trunc_f64_u() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.i32],
-        trace: ['i32.trunc_f64_u']));
+        trace: const ['i32.trunc_f64_u']));
     writeByte(0xAB);
   }
 
   void i64_extend_i32_s() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
-        trace: ['i64.extend_i32_s']));
+        trace: const ['i64.extend_i32_s']));
     writeByte(0xAC);
   }
 
   void i64_extend_i32_u() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
-        trace: ['i64.extend_i32_u']));
+        trace: const ['i64.extend_i32_u']));
     writeByte(0xAD);
   }
 
   void i64_trunc_f32_s() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.i64],
-        trace: ['i64.trunc_f32_s']));
+        trace: const ['i64.trunc_f32_s']));
     writeByte(0xAE);
   }
 
   void i64_trunc_f32_u() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.i64],
-        trace: ['i64.trunc_f32_u']));
+        trace: const ['i64.trunc_f32_u']));
     writeByte(0xAF);
   }
 
   void i64_trunc_f64_s() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.i64],
-        trace: ['i64.trunc_f64_s']));
+        trace: const ['i64.trunc_f64_s']));
     writeByte(0xB0);
   }
 
   void i64_trunc_f64_u() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.i64],
-        trace: ['i64.trunc_f64_u']));
+        trace: const ['i64.trunc_f64_u']));
     writeByte(0xB1);
   }
 
   void f32_convert_i32_s() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.f32],
-        trace: ['f32.convert_i32_s']));
+        trace: const ['f32.convert_i32_s']));
     writeByte(0xB2);
   }
 
   void f32_convert_i32_u() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.f32],
-        trace: ['f32.convert_i32_u']));
+        trace: const ['f32.convert_i32_u']));
     writeByte(0xB3);
   }
 
   void f32_convert_i64_s() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.f32],
-        trace: ['f32.convert_i64_s']));
+        trace: const ['f32.convert_i64_s']));
     writeByte(0xB4);
   }
 
   void f32_convert_i64_u() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.f32],
-        trace: ['f32.convert_i64_u']));
+        trace: const ['f32.convert_i64_u']));
     writeByte(0xB5);
   }
 
   void f32_demote_f64() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.f32],
-        trace: ['f32.demote_f64']));
+        trace: const ['f32.demote_f64']));
     writeByte(0xB6);
   }
 
   void f64_convert_i32_s() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.f64],
-        trace: ['f64.convert_i32_s']));
+        trace: const ['f64.convert_i32_s']));
     writeByte(0xB7);
   }
 
   void f64_convert_i32_u() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.f64],
-        trace: ['f64.convert_i32_u']));
+        trace: const ['f64.convert_i32_u']));
     writeByte(0xB8);
   }
 
   void f64_convert_i64_s() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.f64],
-        trace: ['f64.convert_i64_s']));
+        trace: const ['f64.convert_i64_s']));
     writeByte(0xB9);
   }
 
   void f64_convert_i64_u() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.f64],
-        trace: ['f64.convert_i64_u']));
+        trace: const ['f64.convert_i64_u']));
     writeByte(0xBA);
   }
 
   void f64_promote_f32() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.f64],
-        trace: ['f64.promote_f32']));
+        trace: const ['f64.promote_f32']));
     writeByte(0xBB);
   }
 
   void i32_reinterpret_f32() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.i32],
-        trace: ['i32.reinterpret_f32']));
+        trace: const ['i32.reinterpret_f32']));
     writeByte(0xBC);
   }
 
   void i64_reinterpret_f64() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.i64],
-        trace: ['i64.reinterpret_f64']));
+        trace: const ['i64.reinterpret_f64']));
     writeByte(0xBD);
   }
 
   void f32_reinterpret_i32() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.f32],
-        trace: ['f32.reinterpret_i32']));
+        trace: const ['f32.reinterpret_i32']));
     writeByte(0xBE);
   }
 
   void f64_reinterpret_i64() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.f64],
-        trace: ['f64.reinterpret_i64']));
+        trace: const ['f64.reinterpret_i64']));
     writeByte(0xBF);
   }
 
   void i32_extend8_s() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
-        trace: ['i32.extend8_s']));
+        trace: const ['i32.extend8_s']));
     writeByte(0xC0);
   }
 
   void i32_extend16_s() {
     assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
-        trace: ['i32.extend16_s']));
+        trace: const ['i32.extend16_s']));
     writeByte(0xC1);
   }
 
   void i64_extend8_s() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.i64],
-        trace: ['i64.extend8_s']));
+        trace: const ['i64.extend8_s']));
     writeByte(0xC2);
   }
 
   void i64_extend16_s() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.i64],
-        trace: ['i64.extend16_s']));
+        trace: const ['i64.extend16_s']));
     writeByte(0xC3);
   }
 
   void i64_extend32_s() {
     assert(_verifyTypes(const [NumType.i64], const [NumType.i64],
-        trace: ['i64.extend32_s']));
+        trace: const ['i64.extend32_s']));
     writeByte(0xC4);
   }
 
   void i32_trunc_sat_f32_s() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.i32],
-        trace: ['i32.trunc_sat_f32_s']));
+        trace: const ['i32.trunc_sat_f32_s']));
     writeBytes(const [0xFC, 0x00]);
   }
 
   void i32_trunc_sat_f32_u() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.i32],
-        trace: ['i32.trunc_sat_f32_u']));
+        trace: const ['i32.trunc_sat_f32_u']));
     writeBytes(const [0xFC, 0x01]);
   }
 
   void i32_trunc_sat_f64_s() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.i32],
-        trace: ['i32.trunc_sat_f64_s']));
+        trace: const ['i32.trunc_sat_f64_s']));
     writeBytes(const [0xFC, 0x02]);
   }
 
   void i32_trunc_sat_f64_u() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.i32],
-        trace: ['i32.trunc_sat_f64_u']));
+        trace: const ['i32.trunc_sat_f64_u']));
     writeBytes(const [0xFC, 0x03]);
   }
 
   void i64_trunc_sat_f32_s() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.i64],
-        trace: ['i64.trunc_sat_f32_s']));
+        trace: const ['i64.trunc_sat_f32_s']));
     writeBytes(const [0xFC, 0x04]);
   }
 
   void i64_trunc_sat_f32_u() {
     assert(_verifyTypes(const [NumType.f32], const [NumType.i64],
-        trace: ['i64.trunc_sat_f32_u']));
+        trace: const ['i64.trunc_sat_f32_u']));
     writeBytes(const [0xFC, 0x05]);
   }
 
   void i64_trunc_sat_f64_s() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.i64],
-        trace: ['i64.trunc_sat_f64_s']));
+        trace: const ['i64.trunc_sat_f64_s']));
     writeBytes(const [0xFC, 0x06]);
   }
 
   void i64_trunc_sat_f64_u() {
     assert(_verifyTypes(const [NumType.f64], const [NumType.i64],
-        trace: ['i64.trunc_sat_f64_u']));
+        trace: const ['i64.trunc_sat_f64_u']));
     writeBytes(const [0xFC, 0x07]);
   }
 }
