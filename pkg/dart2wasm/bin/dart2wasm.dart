@@ -132,7 +132,7 @@ main(List<String> args) async {
 
   if (false)
     await runGlobalTransformations(
-        target, component, true, false, false, false, ErrorDetector(),
+        target, component, true, false, false, ErrorDetector(),
         minimalKernel: true);
   //final tableSelectorAssigner = new TableSelectorAssigner(component);
 
