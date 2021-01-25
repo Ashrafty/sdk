@@ -15,6 +15,7 @@ export 'src/module.dart'
 export 'src/types.dart'
     show
         ArrayType,
+        DataType,
         DefType,
         FieldType,
         FunctionType,

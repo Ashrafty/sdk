@@ -65,7 +65,7 @@ class Module with SerializerMixin {
 
   DefinedGlobal addGlobal(GlobalType type) {
     anyGlobalsDefined = true;
-    final global = DefinedGlobal(this, functions.length, type);
+    final global = DefinedGlobal(this, globals.length, type);
     globals.add(global);
     return global;
   }

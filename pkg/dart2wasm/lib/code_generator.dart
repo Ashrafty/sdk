@@ -57,9 +57,8 @@ class CodeGenerator extends Visitor<void> {
       ClassInfo info = translator.classes[member.enclosingClass]!;
       thisLocal = function.addLocal(info.repr);
       b.local_get(function.locals[0]);
-      b.rtt_canon(w.HeapType.def(info.struct));
-      //b.global_get(info.rtt);
-      b.ref_cast(w.HeapType.any, w.HeapType.def(info.struct));
+      b.global_get(info.rtt);
+      b.ref_cast(info.struct);
       b.local_set(thisLocal!);
     } else {
       thisLocal = null;
@@ -176,8 +175,7 @@ class CodeGenerator extends Visitor<void> {
   void visitConstructorInvocation(ConstructorInvocation node) {
     ClassInfo info = translator.classes[node.target.enclosingClass]!;
     w.Local temp = function.addLocal(info.repr);
-    b.rtt_canon(w.HeapType.def(info.struct));
-    //b.global_get(info.rtt);
+    b.global_get(info.rtt);
     b.struct_new_default_with_rtt(info.struct);
     b.local_tee(temp);
     b.i32_const(info.classId);

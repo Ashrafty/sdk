@@ -35,11 +35,10 @@ class ClassInfoCollector {
         info.struct.fields.add(w.FieldType(w.NumType.i32));
 
         info.depth = 1;
-        w.HeapType heapType = w.HeapType.def(info.struct);
-        info.rtt =
-            m.addGlobal(w.GlobalType(w.Rtt(heapType, 1), mutable: false));
+        info.rtt = m.addGlobal(
+            w.GlobalType(w.Rtt(info.struct, info.depth), mutable: false));
         w.Instructions b = info.rtt.initializer;
-        b.rtt_canon(heapType);
+        b.rtt_canon(info.struct);
         b.end();
       } else {
         generateFields(superclass);
@@ -49,13 +48,11 @@ class ClassInfoCollector {
         }
 
         info.depth = superInfo.depth + 1;
-        w.HeapType heapType = w.HeapType.def(info.struct);
-        w.HeapType superHeapType = w.HeapType.def(superInfo.struct);
         info.rtt = m.addGlobal(
-            w.GlobalType(w.Rtt(heapType, info.depth), mutable: false));
+            w.GlobalType(w.Rtt(info.struct, info.depth), mutable: false));
         w.Instructions b = info.rtt.initializer;
         b.global_get(superInfo.rtt);
-        b.rtt_sub(superInfo.depth, superHeapType, heapType);
+        b.rtt_sub(info.struct);
         b.end();
       }
       for (Field field in cls.fields) {

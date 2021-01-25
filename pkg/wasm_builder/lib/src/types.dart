@@ -16,6 +16,8 @@ abstract class ValueType implements StorageType {
   @override
   ValueType get unpacked => this;
 
+  bool get nullable => false;
+
   ValueType withNullability(bool nullable) => this;
 }
 
@@ -74,31 +76,37 @@ class NumType extends ValueType {
 }
 
 class Rtt extends ValueType {
-  final HeapType heapType;
+  final DataType dataType;
   final int? depth;
 
-  const Rtt(this.heapType, [this.depth]);
+  const Rtt(this.dataType, [this.depth]);
 
   @override
   bool isSubtypeOf(StorageType other) =>
-      other is Rtt && heapType == other.heapType;
+      other is Rtt &&
+      dataType == other.dataType &&
+      (other.depth == null || depth == other.depth);
 
   @override
   void serialize(Serializer s) {
-    s.writeByte(0x69);
-    s.writeUnsigned(depth!);
-    s.write(heapType);
+    if (depth != null) {
+      s.writeByte(0x69);
+      s.writeUnsigned(depth!);
+    } else {
+      s.writeByte(0x68);
+    }
+    s.writeUnsigned(dataType.index);
   }
 
   @override
-  String toString() => "rtt $depth $heapType";
+  String toString() => depth == null ? "rtt $dataType" : "rtt $depth $dataType";
 
   @override
   bool operator ==(Object other) =>
-      other is Rtt && other.heapType == heapType && other.depth == depth;
+      other is Rtt && other.dataType == dataType && other.depth == depth;
 
   @override
-  int get hashCode => heapType.hashCode * (3 + depth! * 2);
+  int get hashCode => dataType.hashCode * (3 + (depth ?? -3) * 2);
 }
 
 class RefType extends ValueType {
@@ -107,14 +115,23 @@ class RefType extends ValueType {
 
   RefType(this.heapType, {bool? nullable})
       : this.nullable = nullable ??
-            heapType.defaultNullability ??
+            heapType.nullableByDefault ??
             (throw "Unspecified nullability");
 
-  RefType.any({bool? nullable}) : this(HeapType.any, nullable: nullable);
-  RefType.eq({bool? nullable}) : this(HeapType.eq, nullable: nullable);
-  RefType.i31({bool? nullable}) : this(HeapType.i31, nullable: nullable);
-  RefType.func({bool? nullable}) : this(HeapType.func, nullable: nullable);
-  RefType.extern({bool? nullable}) : this(HeapType.extern, nullable: nullable);
+  const RefType._(this.heapType, this.nullable);
+
+  const RefType.any({bool nullable = AnyHeapType.defaultNullability})
+      : this._(HeapType.any, nullable);
+  const RefType.eq({bool nullable = EqHeapType.defaultNullability})
+      : this._(HeapType.eq, nullable);
+  const RefType.func({bool nullable = FuncHeapType.defaultNullability})
+      : this._(HeapType.func, nullable);
+  const RefType.data({bool nullable = DataHeapType.defaultNullability})
+      : this._(HeapType.data, nullable);
+  const RefType.i31({bool nullable = I31HeapType.defaultNullability})
+      : this._(HeapType.i31, nullable);
+  const RefType.extern({bool nullable = ExternHeapType.defaultNullability})
+      : this._(HeapType.extern, nullable);
   RefType.def(DefType defType, {required bool nullable})
       : this(HeapType.def(defType), nullable: nullable);
 
@@ -131,7 +148,7 @@ class RefType extends ValueType {
 
   @override
   void serialize(Serializer s) {
-    if (nullable != heapType.defaultNullability) {
+    if (nullable != heapType.nullableByDefault) {
       s.writeByte(nullable ? 0x6C : 0x6B);
     }
     s.write(heapType);
@@ -139,7 +156,7 @@ class RefType extends ValueType {
 
   @override
   String toString() {
-    if (nullable == heapType.defaultNullability) return "${heapType}ref";
+    if (nullable == heapType.nullableByDefault) return "${heapType}ref";
     return "ref${nullable ? " null " : " "}${heapType}";
   }
 
@@ -158,18 +175,24 @@ abstract class HeapType implements Serializable {
 
   static const any = AnyHeapType._();
   static const eq = EqHeapType._();
-  static const i31 = I31HeapType._();
   static const func = FuncHeapType._();
+  static const data = DataHeapType._();
+  static const i31 = I31HeapType._();
   static const extern = ExternHeapType._();
   static DefHeapType def(DefType defType) => DefHeapType._(defType);
 
-  bool? get defaultNullability => true;
+  bool? get nullableByDefault;
 
   bool isSubtypeOf(HeapType other);
 }
 
 class AnyHeapType extends HeapType {
   const AnyHeapType._();
+
+  static const defaultNullability = true;
+
+  @override
+  bool? get nullableByDefault => defaultNullability;
 
   @override
   bool isSubtypeOf(HeapType other) => other == HeapType.any;
@@ -184,6 +207,11 @@ class AnyHeapType extends HeapType {
 class EqHeapType extends HeapType {
   const EqHeapType._();
 
+  static const defaultNullability = true;
+
+  @override
+  bool? get nullableByDefault => defaultNullability;
+
   @override
   bool isSubtypeOf(HeapType other) =>
       other == HeapType.any || other == HeapType.eq;
@@ -195,25 +223,13 @@ class EqHeapType extends HeapType {
   String toString() => "eq";
 }
 
-class I31HeapType extends HeapType {
-  const I31HeapType._();
-
-  @override
-  bool? get defaultNullability => false;
-
-  @override
-  bool isSubtypeOf(HeapType other) =>
-      other == HeapType.any || other == HeapType.eq || other == HeapType.i31;
-
-  @override
-  void serialize(Serializer s) => s.writeByte(0x6A);
-
-  @override
-  String toString() => "i31";
-}
-
 class FuncHeapType extends HeapType {
   const FuncHeapType._();
+
+  static const defaultNullability = true;
+
+  @override
+  bool? get nullableByDefault => defaultNullability;
 
   @override
   bool isSubtypeOf(HeapType other) =>
@@ -226,8 +242,51 @@ class FuncHeapType extends HeapType {
   String toString() => "func";
 }
 
+class DataHeapType extends HeapType {
+  const DataHeapType._();
+
+  static const defaultNullability = false;
+
+  @override
+  bool? get nullableByDefault => defaultNullability;
+
+  @override
+  bool isSubtypeOf(HeapType other) =>
+      other == HeapType.any || other == HeapType.eq || other == HeapType.data;
+
+  @override
+  void serialize(Serializer s) => s.writeByte(0x67);
+
+  @override
+  String toString() => "data";
+}
+
+class I31HeapType extends HeapType {
+  const I31HeapType._();
+
+  static const defaultNullability = false;
+
+  @override
+  bool? get nullableByDefault => defaultNullability;
+
+  @override
+  bool isSubtypeOf(HeapType other) =>
+      other == HeapType.any || other == HeapType.eq || other == HeapType.i31;
+
+  @override
+  void serialize(Serializer s) => s.writeByte(0x6A);
+
+  @override
+  String toString() => "i31";
+}
+
 class ExternHeapType extends HeapType {
   const ExternHeapType._();
+
+  static const defaultNullability = true;
+
+  @override
+  bool? get nullableByDefault => defaultNullability;
 
   @override
   bool isSubtypeOf(HeapType other) =>
@@ -246,13 +305,19 @@ class DefHeapType extends HeapType {
   DefHeapType._(this.def);
 
   @override
-  bool? get defaultNullability => null;
+  bool? get nullableByDefault => null;
 
   @override
-  bool isSubtypeOf(HeapType other) =>
-      other == HeapType.any ||
-      other == HeapType.eq ||
-      other is DefHeapType && def.isSubtypeOf(other.def);
+  bool isSubtypeOf(HeapType other) {
+    assert(def is FunctionType || def is DataType);
+    if (other is! DefHeapType) {
+      return other == HeapType.any ||
+          (def is FunctionType
+              ? other == HeapType.func
+              : other == HeapType.eq || other == HeapType.data);
+    }
+    return def.isSubtypeOf(other.def);
+  }
 
   @override
   void serialize(Serializer s) => s.writeSigned(def.index);
@@ -309,11 +374,19 @@ class FunctionType extends DefType {
   String toString() => "(${inputs.join(", ")}) -> (${outputs.join(", ")})";
 }
 
-class StructType extends DefType {
+abstract class DataType extends DefType {
   final String name;
+
+  DataType(this.name);
+
+  @override
+  String toString() => name;
+}
+
+class StructType extends DataType {
   final List<FieldType> fields = [];
 
-  StructType(this.name);
+  StructType(String name) : super(name);
 
   @override
   bool isSubtypeOf(DefType other) {
@@ -330,29 +403,24 @@ class StructType extends DefType {
     s.writeByte(0x5F);
     s.writeList(fields);
   }
-
-  @override
-  String toString() => name;
 }
 
-class ArrayType extends DefType {
-  final String name;
+class ArrayType extends DataType {
   late final FieldType elementType;
 
-  ArrayType(this.name);
+  ArrayType(String name) : super(name);
 
   @override
-  bool isSubtypeOf(DefType other) =>
-      other is ArrayType && elementType.isSubtypeOf(other.elementType);
+  bool isSubtypeOf(DefType other) {
+    if (other is! ArrayType) return false;
+    return elementType.isSubtypeOf(other.elementType);
+  }
 
   @override
   void serialize(Serializer s) {
     s.writeByte(0x5E);
     s.write(elementType);
   }
-
-  @override
-  String toString() => name;
 }
 
 class _WithMutability<T extends StorageType> implements Serializable {
