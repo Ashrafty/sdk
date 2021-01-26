@@ -1,10 +1,11 @@
-// Copyright (c) 2020, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2021, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:dart2wasm/analyzer.dart';
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
+import 'package:dart2wasm/dispatch_table.dart';
 import 'package:dart2wasm/functions.dart';
 import 'package:dart2wasm/intrinsics.dart';
 
@@ -20,22 +21,23 @@ class Translator {
   List<Library> libraries;
   CoreTypes coreTypes;
   TypeEnvironment typeEnvironment;
-  //TableSelectorAssigner tableSelectorAssigner;
+  TableSelectorAssigner tableSelectorAssigner;
 
   late Intrinsics intrinsics;
+  late DispatchTable dispatchTable;
 
-  Map<Class, ClassInfo> classes = {};
+  List<ClassInfo> classes = [];
+  Map<Class, ClassInfo> classInfo = {};
   Map<Field, int> fieldIndex = {};
   Map<Member, w.BaseFunction> functions = {};
   late Procedure mainFunction;
   late w.Module m;
 
-  Translator(this.component, this.coreTypes,
-      this.typeEnvironment /*,
-      this.tableSelectorAssigner*/
-      )
+  Translator(this.component, this.coreTypes, this.typeEnvironment,
+      this.tableSelectorAssigner)
       : libraries = [component.libraries.first] {
     intrinsics = Intrinsics(this);
+    dispatchTable = DispatchTable(this);
   }
 
   w.Module translate() {
@@ -53,6 +55,8 @@ class Translator {
     }
 
     FunctionCollector(this).collect();
+    dispatchTable.build();
+    dispatchTable.output();
 
     //mainFunction =
     //    libraries.first.procedures.firstWhere((p) => p.name.name == "main");
@@ -64,8 +68,8 @@ class Translator {
     for (Member member in functions.keys) {
       w.BaseFunction function = functions[member]!;
       if (function is w.DefinedFunction) {
-        print(member);
-        print(member.function.body);
+        //print(member);
+        //print(member.function.body);
         m.exportFunction(member.toString(), function);
         codeGen.generate(member, function);
       }
@@ -95,7 +99,7 @@ class Translator {
         }
         return w.NumType.i32;
       }
-      return classes[type.classNode]!.repr;
+      return classInfo[type.classNode]!.repr;
     }
     if (type is FunctionType) {
       // TODO

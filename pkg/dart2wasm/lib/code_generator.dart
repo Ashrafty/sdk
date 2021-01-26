@@ -1,4 +1,4 @@
-// Copyright (c) 2020, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2021, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -9,6 +9,7 @@ import 'package:kernel/type_environment.dart';
 import 'package:kernel/visitor.dart';
 
 import 'package:dart2wasm/class_info.dart';
+import 'package:dart2wasm/dispatch_table.dart';
 import 'package:dart2wasm/intrinsics.dart';
 import 'package:dart2wasm/translator.dart';
 
@@ -17,11 +18,13 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 class CodeGenerator extends Visitor<void> {
   Translator translator;
 
+  late Member member;
+  late StaticTypeContext typeContext;
+
   Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
   late w.DefinedFunction function;
   late w.Instructions b;
-  late StaticTypeContext typeContext;
 
   CodeGenerator(this.translator);
 
@@ -39,6 +42,7 @@ class CodeGenerator extends Visitor<void> {
       return;
     }
 
+    this.member = member;
     typeContext = StaticTypeContext(member, translator.typeEnvironment);
 
     List<VariableDeclaration> params = member.function.positionalParameters;
@@ -51,10 +55,20 @@ class CodeGenerator extends Visitor<void> {
     this.function = function;
     b = function.body;
     if (member is Constructor) {
+      ClassInfo info = translator.classInfo[member.enclosingClass]!;
       thisLocal = function.locals[0];
+      Class cls = member.enclosingClass;
+      for (Field field in cls.fields) {
+        if (field.isInstanceMember && field.initializer != null) {
+          int fieldIndex = translator.fieldIndex[field]!;
+          b.local_get(thisLocal!);
+          field.initializer!.accept(this);
+          b.struct_set(info.struct, fieldIndex);
+        }
+      }
       visitList(member.initializers, this);
     } else if (implicitParams == 1) {
-      ClassInfo info = translator.classes[member.enclosingClass]!;
+      ClassInfo info = translator.classInfo[member.enclosingClass]!;
       thisLocal = function.addLocal(info.repr);
       b.local_get(function.locals[0]);
       b.global_get(info.rtt);
@@ -65,12 +79,12 @@ class CodeGenerator extends Visitor<void> {
     }
     member.function.body.accept(this);
     b.end();
-    print(b.trace);
+    //print(b.trace);
   }
 
   void visitFieldInitializer(FieldInitializer node) {
-    w.StructType struct =
-        translator.classes[(node.parent as Constructor).enclosingClass]!.struct;
+    w.StructType struct = translator
+        .classInfo[(node.parent as Constructor).enclosingClass]!.struct;
     int fieldIndex = translator.fieldIndex[node.field]!;
 
     b.local_get(thisLocal!);
@@ -131,6 +145,14 @@ class CodeGenerator extends Visitor<void> {
     b.end();
   }
 
+  void visitDoStatement(DoStatement node) {
+    w.Label loop = b.loop();
+    node.body.accept(this);
+    node.condition.accept(this);
+    b.br_if(loop);
+    b.end();
+  }
+
   void visitWhileStatement(WhileStatement node) {
     w.Label block = b.block();
     w.Label loop = b.loop();
@@ -173,7 +195,7 @@ class CodeGenerator extends Visitor<void> {
   }
 
   void visitConstructorInvocation(ConstructorInvocation node) {
-    ClassInfo info = translator.classes[node.target.enclosingClass]!;
+    ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
     w.Local temp = function.addLocal(info.repr);
     b.global_get(info.rtt);
     b.struct_new_default_with_rtt(info.struct);
@@ -188,7 +210,19 @@ class CodeGenerator extends Visitor<void> {
 
   void visitStaticInvocation(StaticInvocation node) {
     node.arguments.accept(this);
+    if (node.target == translator.coreTypes.identicalProcedure) {
+      // TODO: Check for reference types
+      b.ref_eq();
+      return;
+    }
     w.BaseFunction target = translator.functions[node.target]!;
+    b.call(target);
+  }
+
+  void visitSuperMethodInvocation(SuperMethodInvocation node) {
+    b.local_get(thisLocal!);
+    node.arguments.accept(this);
+    w.BaseFunction target = translator.functions[node.interfaceTarget]!;
     b.call(target);
   }
 
@@ -207,7 +241,7 @@ class CodeGenerator extends Visitor<void> {
         return;
       }
     }
-    _virtualCall(target, node.arguments);
+    _virtualCall(target, node.arguments, getter: false);
   }
 
   void visitEqualsCall(EqualsCall node) {
@@ -218,9 +252,18 @@ class CodeGenerator extends Visitor<void> {
       intrinsic(this);
       return;
     }
-    throw "EqualsCall of types "
-        "${node.left.getStaticType(typeContext)} and "
-        "${node.right.getStaticType(typeContext)} not supported";
+    // TODO: virtual call
+    node.left.accept(this);
+    node.right.accept(this);
+    b.ref_eq();
+    if (node.isNot) {
+      b.i32_eqz();
+    }
+
+    if (false)
+      throw "EqualsCall of types "
+          "${node.left.getStaticType(typeContext)} and "
+          "${node.right.getStaticType(typeContext)} not supported";
   }
 
   void visitEqualsNull(EqualsNull node) {
@@ -231,14 +274,25 @@ class CodeGenerator extends Visitor<void> {
     }
   }
 
-  void _virtualCall(Procedure interfaceTarget, Arguments arguments) {
-    // TODO: Virtual calls
+  void _virtualCall(Procedure interfaceTarget, Arguments arguments,
+      {required bool getter}) {
+    int selectorId = getter
+        ? translator.tableSelectorAssigner.getterSelectorId(interfaceTarget)
+        : translator.tableSelectorAssigner
+            .methodOrSetterSelectorId(interfaceTarget);
+    SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
+
+    // Receiver is already on stack.
+    w.StructType objectStruct = translator.classes[0].struct;
+    w.Local temp =
+        function.addLocal(w.RefType.def(objectStruct, nullable: true));
+    b.local_tee(temp);
     arguments.accept(this);
-    w.BaseFunction? function = translator.functions[interfaceTarget];
-    if (function == null) {
-      throw "No known target for $interfaceTarget";
-    }
-    b.call(function);
+    b.i32_const(selector.offset);
+    b.local_get(temp);
+    b.struct_get(objectStruct, 0);
+    b.i32_add();
+    b.call_indirect(selector.signature);
   }
 
   @override
@@ -265,7 +319,7 @@ class CodeGenerator extends Visitor<void> {
     Member target = node.interfaceTarget;
     if (target is Field) {
       node.receiver.accept(this);
-      w.StructType struct = translator.classes[target.enclosingClass]!.struct;
+      w.StructType struct = translator.classInfo[target.enclosingClass]!.struct;
       int fieldIndex = translator.fieldIndex[target]!;
       //b.rtt_canon(w.HeapType.def(struct));
       //b.ref_cast(w.HeapType.any, w.HeapType.def(struct));
@@ -273,7 +327,7 @@ class CodeGenerator extends Visitor<void> {
       return;
     } else if (target is Procedure && target.isGetter) {
       node.receiver.accept(this);
-      _virtualCall(target, Arguments([]));
+      _virtualCall(target, Arguments([]), getter: true);
       return;
     }
     throw "InstanceGet of non-Field/Getter $target not supported";
@@ -284,7 +338,7 @@ class CodeGenerator extends Visitor<void> {
     Member target = node.interfaceTarget;
     if (target is Field) {
       node.receiver.accept(this);
-      w.StructType struct = translator.classes[target.enclosingClass]!.struct;
+      w.StructType struct = translator.classInfo[target.enclosingClass]!.struct;
       int fieldIndex = translator.fieldIndex[target]!;
       //b.rtt_canon(w.HeapType.def(struct));
       //b.ref_cast(w.HeapType.any, w.HeapType.def(struct));
@@ -295,7 +349,7 @@ class CodeGenerator extends Visitor<void> {
       b.local_get(temp);
       return;
     }
-    throw "PropertyGet of non-Field $target not supported";
+    throw "InstanceSet of non-Field $target not supported";
   }
 
   void visitLogicalExpression(LogicalExpression node) {
@@ -339,6 +393,10 @@ class CodeGenerator extends Visitor<void> {
     node.constant.accept(this);
   }
 
+  void visitBoolLiteral(BoolLiteral node) {
+    b.i32_const(node.value ? 1 : 0);
+  }
+
   void visitIntLiteral(IntLiteral node) {
     b.i64_const(node.value);
   }
@@ -349,6 +407,11 @@ class CodeGenerator extends Visitor<void> {
 
   void visitDoubleLiteral(DoubleLiteral node) {
     b.f64_const(node.value);
+  }
+
+  void visitAsExpression(AsExpression node) {
+    node.operand.accept(this);
+    // TODO: Check
   }
 
   void visitNullLiteral(NullLiteral node) {
@@ -363,8 +426,14 @@ class CodeGenerator extends Visitor<void> {
       type = target is Field
           ? target.type
           : target.function.positionalParameters.single.type;
+    } else if (parent is Field) {
+      type = parent.type;
     } else if (parent is FieldInitializer) {
       type = parent.field.type;
+    } else if (parent is ReturnStatement) {
+      type = member.function!.returnType;
+    } else if (parent is AsExpression) {
+      type = parent.type;
     } else {
       throw "Unsupported null literal context: $parent";
     }

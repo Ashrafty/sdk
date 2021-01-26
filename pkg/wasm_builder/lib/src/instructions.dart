@@ -1,4 +1,4 @@
-// Copyright (c) 2020, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2021, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -261,7 +261,7 @@ class Instructions with SerializerMixin {
   void end() {
     assert(_verifyEndOfBlock(labelStack.last.outputs,
         trace: const ['end'],
-        reachableAfter: reachable | labelStack.last.jumpToEnd,
+        reachableAfter: reachable || labelStack.last.jumpToEnd,
         reindent: false));
     reachable |= labelStack.last.jumpToEnd;
     labelStack.removeLast();
@@ -331,7 +331,7 @@ class Instructions with SerializerMixin {
 
   void call_indirect(FunctionType type, [Table? table]) {
     assert(_verifyTypes([...type.inputs, NumType.i32], type.outputs,
-        trace: ['call_indirect', type]));
+        trace: ['call_indirect', type, if (table != null) table.index]));
     writeByte(0x11);
     writeUnsigned(type.index);
     writeUnsigned(table?.index ?? 0);

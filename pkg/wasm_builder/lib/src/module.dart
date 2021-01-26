@@ -1,4 +1,4 @@
-// Copyright (c) 2020, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2021, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -57,7 +57,7 @@ class Module with SerializerMixin {
     return function;
   }
 
-  Table addTable(int minSize, int? maxSize) {
+  Table addTable(int minSize, [int? maxSize]) {
     final table = Table(tables.length, minSize, maxSize);
     tables.add(table);
     return table;
@@ -103,9 +103,11 @@ class Module with SerializerMixin {
     TypeSection(this).serialize(this);
     ImportSection(this).serialize(this);
     FunctionSection(this).serialize(this);
+    TableSection(this).serialize(this);
     GlobalSection(this).serialize(this);
     ExportSection(this).serialize(this);
     if (startFunction != null) StartSection(this).serialize(this);
+    ElementSection(this).serialize(this);
     CodeSection(this).serialize(this);
     return data;
   }
@@ -476,6 +478,7 @@ class ElementSection extends Section {
         if (function != null) {
           if (current == null) {
             current = _Element(table, i);
+            elements.add(current);
           }
           current.entries.add(function);
         } else {

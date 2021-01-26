@@ -1,4 +1,4 @@
-// Copyright (c) 2020, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2021, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -134,7 +134,7 @@ main(List<String> args) async {
     await runGlobalTransformations(
         target, component, true, false, false, ErrorDetector(),
         minimalKernel: true);
-  //final tableSelectorAssigner = new TableSelectorAssigner(component);
+  final tableSelectorAssigner = new TableSelectorAssigner(component);
 
   print(component.libraries
       .map((l) => "${l.name}: ${l.classes.length} ${l.members.length}")
@@ -143,9 +143,7 @@ main(List<String> args) async {
   var translator = Translator(
       component,
       compilerResult.coreTypes,
-      TypeEnvironment(compilerResult.coreTypes,
-          compilerResult.classHierarchy) /*,
-      tableSelectorAssigner*/
-      );
+      TypeEnvironment(compilerResult.coreTypes, compilerResult.classHierarchy),
+      tableSelectorAssigner);
   File(args[1]).writeAsBytesSync(translator.translate().encode());
 }

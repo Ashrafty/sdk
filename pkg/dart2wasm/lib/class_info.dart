@@ -1,4 +1,4 @@
-// Copyright (c) 2020, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2021, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -9,6 +9,7 @@ import 'package:kernel/ast.dart';
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class ClassInfo {
+  Class cls;
   w.StructType struct;
   w.ValueType repr;
   late int depth;
@@ -16,7 +17,7 @@ class ClassInfo {
   late int classId;
   bool initialized = false;
 
-  ClassInfo(this.struct, this.repr);
+  ClassInfo(this.cls, this.struct, this.repr);
 }
 
 class ClassInfoCollector {
@@ -27,7 +28,7 @@ class ClassInfoCollector {
   ClassInfoCollector(this.translator) : m = translator.m;
 
   void generateFields(Class cls) {
-    ClassInfo info = translator.classes[cls]!;
+    ClassInfo info = translator.classInfo[cls]!;
     if (!info.initialized) {
       Class? superclass = cls.superclass;
       if (superclass == null) {
@@ -42,7 +43,7 @@ class ClassInfoCollector {
         b.end();
       } else {
         generateFields(superclass);
-        ClassInfo superInfo = translator.classes[superclass]!;
+        ClassInfo superInfo = translator.classInfo[superclass]!;
         for (w.FieldType fieldType in superInfo.struct.fields) {
           info.struct.fields.add(fieldType);
         }
@@ -67,6 +68,7 @@ class ClassInfoCollector {
 
       info.classId = nextClassId++;
       info.initialized = true;
+      translator.classes.add(info);
     }
   }
 
@@ -76,7 +78,7 @@ class ClassInfoCollector {
         w.StructType structType = m.addStructType(cls.name);
         // TODO: Have less precise representation type to enable interfaces
         w.ValueType reprType = w.RefType.def(structType, nullable: true);
-        translator.classes[cls] = ClassInfo(structType, reprType);
+        translator.classInfo[cls] = ClassInfo(cls, structType, reprType);
       }
     }
 
