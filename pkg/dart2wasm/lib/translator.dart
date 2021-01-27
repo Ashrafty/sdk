@@ -10,6 +10,8 @@ import 'package:dart2wasm/functions.dart';
 import 'package:dart2wasm/intrinsics.dart';
 
 import 'package:kernel/ast.dart';
+import 'package:kernel/class_hierarchy.dart'
+    show ClassHierarchy, ClassHierarchySubtypes, ClosedWorldClassHierarchy;
 import 'package:kernel/core_types.dart';
 import 'package:kernel/type_environment.dart';
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
@@ -22,6 +24,8 @@ class Translator {
   CoreTypes coreTypes;
   TypeEnvironment typeEnvironment;
   TableSelectorAssigner tableSelectorAssigner;
+  ClosedWorldClassHierarchy hierarchy;
+  late ClassHierarchySubtypes subtypes;
 
   late Intrinsics intrinsics;
   late DispatchTable dispatchTable;
@@ -35,7 +39,10 @@ class Translator {
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
       this.tableSelectorAssigner)
-      : libraries = [component.libraries.first] {
+      : libraries = [component.libraries.first],
+        hierarchy =
+            ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
+    subtypes = hierarchy.computeSubtypesInformation();
     intrinsics = Intrinsics(this);
     dispatchTable = DispatchTable(this);
   }
@@ -68,10 +75,11 @@ class Translator {
     for (Member member in functions.keys) {
       w.BaseFunction function = functions[member]!;
       if (function is w.DefinedFunction) {
-        //print(member);
+        //print("#${function.index}: $member");
         //print(member.function.body);
         m.exportFunction(member.toString(), function);
         codeGen.generate(member, function);
+        //print(function.body.trace);
       }
     }
 

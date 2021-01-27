@@ -102,7 +102,7 @@ class Instructions with SerializerMixin {
       instr = instr.length > instructionColumnWidth - 2
           ? instr.substring(0, instructionColumnWidth - 4) + "... "
           : instr.padRight(instructionColumnWidth);
-      String stack = reachable ? _stackTypes.join(', ') : "-";
+      String stack = reachableAfter ? _stackTypes.join(', ') : "-";
       String line = "$instr$stack\n";
       _indent += indentAfter;
 

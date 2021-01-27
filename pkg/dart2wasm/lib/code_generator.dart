@@ -79,7 +79,6 @@ class CodeGenerator extends Visitor<void> {
     }
     member.function.body.accept(this);
     b.end();
-    //print(b.trace);
   }
 
   void visitFieldInitializer(FieldInitializer node) {
@@ -241,7 +240,7 @@ class CodeGenerator extends Visitor<void> {
         return;
       }
     }
-    _virtualCall(target, node.arguments, getter: false);
+    _virtualCall(target, node.arguments, getter: false, setter: false);
   }
 
   void visitEqualsCall(EqualsCall node) {
@@ -275,7 +274,16 @@ class CodeGenerator extends Visitor<void> {
   }
 
   void _virtualCall(Procedure interfaceTarget, Arguments arguments,
-      {required bool getter}) {
+      {required bool getter, required bool setter}) {
+    Member? singleTarget = translator.subtypes
+        .getSingleTargetForInterfaceInvocation(interfaceTarget, setter: setter);
+    if (singleTarget != null) {
+      arguments.accept(this);
+      w.BaseFunction target = translator.functions[singleTarget]!;
+      b.call(target);
+      return;
+    }
+
     int selectorId = getter
         ? translator.tableSelectorAssigner.getterSelectorId(interfaceTarget)
         : translator.tableSelectorAssigner
@@ -324,10 +332,14 @@ class CodeGenerator extends Visitor<void> {
       //b.rtt_canon(w.HeapType.def(struct));
       //b.ref_cast(w.HeapType.any, w.HeapType.def(struct));
       b.struct_get(struct, fieldIndex);
+      if (struct.fields[fieldIndex].type.unpacked.nullable &&
+          !target.type.isPotentiallyNullable) {
+        b.ref_as_non_null();
+      }
       return;
     } else if (target is Procedure && target.isGetter) {
       node.receiver.accept(this);
-      _virtualCall(target, Arguments([]), getter: true);
+      _virtualCall(target, Arguments([]), getter: true, setter: false);
       return;
     }
     throw "InstanceGet of non-Field/Getter $target not supported";
