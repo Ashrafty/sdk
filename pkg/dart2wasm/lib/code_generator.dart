@@ -332,10 +332,6 @@ class CodeGenerator extends Visitor<void> {
       //b.rtt_canon(w.HeapType.def(struct));
       //b.ref_cast(w.HeapType.any, w.HeapType.def(struct));
       b.struct_get(struct, fieldIndex);
-      if (struct.fields[fieldIndex].type.unpacked.nullable &&
-          !target.type.isPotentiallyNullable) {
-        b.ref_as_non_null();
-      }
       return;
     } else if (target is Procedure && target.isGetter) {
       node.receiver.accept(this);
