@@ -35,7 +35,7 @@ class ClassInfoCollector {
         // Object - add class id field
         info.struct.fields.add(w.FieldType(w.NumType.i32));
 
-        info.depth = 1;
+        info.depth = 0;
         info.rtt = m.addGlobal(
             w.GlobalType(w.Rtt(info.struct, info.depth), mutable: false));
         w.Instructions b = info.rtt.initializer;

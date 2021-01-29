@@ -76,15 +76,15 @@ class NumType extends ValueType {
 }
 
 class Rtt extends ValueType {
-  final DataType dataType;
+  final DefType defType;
   final int? depth;
 
-  const Rtt(this.dataType, [this.depth]);
+  const Rtt(this.defType, [this.depth]);
 
   @override
   bool isSubtypeOf(StorageType other) =>
       other is Rtt &&
-      dataType == other.dataType &&
+      defType == other.defType &&
       (other.depth == null || depth == other.depth);
 
   @override
@@ -95,18 +95,18 @@ class Rtt extends ValueType {
     } else {
       s.writeByte(0x68);
     }
-    s.writeUnsigned(dataType.index);
+    s.writeUnsigned(defType.index);
   }
 
   @override
-  String toString() => depth == null ? "rtt $dataType" : "rtt $depth $dataType";
+  String toString() => depth == null ? "rtt $defType" : "rtt $depth $defType";
 
   @override
   bool operator ==(Object other) =>
-      other is Rtt && other.dataType == dataType && other.depth == depth;
+      other is Rtt && other.defType == defType && other.depth == depth;
 
   @override
-  int get hashCode => dataType.hashCode * (3 + (depth ?? -3) * 2);
+  int get hashCode => defType.hashCode * (3 + (depth ?? -3) * 2);
 }
 
 class RefType extends ValueType {

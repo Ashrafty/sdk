@@ -72,7 +72,7 @@ class CodeGenerator extends Visitor<void> {
       thisLocal = function.addLocal(info.repr);
       b.local_get(function.locals[0]);
       b.global_get(info.rtt);
-      b.ref_cast(info.struct);
+      b.ref_cast();
       b.local_set(thisLocal!);
     } else {
       thisLocal = null;
