@@ -106,7 +106,7 @@ class Module with SerializerMixin {
     TableSection(this).serialize(this);
     GlobalSection(this).serialize(this);
     ExportSection(this).serialize(this);
-    if (startFunction != null) StartSection(this).serialize(this);
+    StartSection(this).serialize(this);
     ElementSection(this).serialize(this);
     CodeSection(this).serialize(this);
     return data;
@@ -344,13 +344,17 @@ abstract class Section with SerializerMixin implements Serializable {
   Section(this.module);
 
   void serialize(Serializer s) {
-    serializeContents();
-    s.writeByte(id);
-    s.writeUnsigned(data.length);
-    s.writeBytes(data);
+    if (isNotEmpty) {
+      serializeContents();
+      s.writeByte(id);
+      s.writeUnsigned(data.length);
+      s.writeBytes(data);
+    }
   }
 
   int get id;
+
+  bool get isNotEmpty;
 
   void serializeContents();
 }
@@ -360,6 +364,9 @@ class TypeSection extends Section {
 
   @override
   int get id => 1;
+
+  @override
+  bool get isNotEmpty => module.defTypes.isNotEmpty;
 
   @override
   void serializeContents() {
@@ -374,6 +381,9 @@ class ImportSection extends Section {
   int get id => 2;
 
   @override
+  bool get isNotEmpty => module.imports.isNotEmpty;
+
+  @override
   void serializeContents() {
     writeList(module.imports.toList());
   }
@@ -384,6 +394,10 @@ class FunctionSection extends Section {
 
   @override
   int get id => 3;
+
+  @override
+  bool get isNotEmpty =>
+      module.functions.whereType<DefinedFunction>().isNotEmpty;
 
   @override
   void serializeContents() {
@@ -401,6 +415,9 @@ class TableSection extends Section {
   int get id => 4;
 
   @override
+  bool get isNotEmpty => module.tables.isNotEmpty;
+
+  @override
   void serializeContents() {
     writeList(module.tables);
   }
@@ -411,6 +428,9 @@ class GlobalSection extends Section {
 
   @override
   int get id => 6;
+
+  @override
+  bool get isNotEmpty => module.globals.whereType<DefinedGlobal>().isNotEmpty;
 
   @override
   void serializeContents() {
@@ -425,6 +445,9 @@ class ExportSection extends Section {
   int get id => 7;
 
   @override
+  bool get isNotEmpty => module.exports.isNotEmpty;
+
+  @override
   void serializeContents() {
     writeList(module.exports);
   }
@@ -435,6 +458,9 @@ class StartSection extends Section {
 
   @override
   int get id => 8;
+
+  @override
+  bool get isNotEmpty => module.startFunction != null;
 
   @override
   void serializeContents() {
@@ -469,6 +495,10 @@ class ElementSection extends Section {
   int get id => 9;
 
   @override
+  bool get isNotEmpty =>
+      module.tables.any((table) => table.elements.any((e) => e != null));
+
+  @override
   void serializeContents() {
     List<_Element> elements = [];
     for (Table table in module.tables) {
@@ -495,6 +525,10 @@ class CodeSection extends Section {
 
   @override
   int get id => 10;
+
+  @override
+  bool get isNotEmpty =>
+      module.functions.whereType<DefinedFunction>().isNotEmpty;
 
   @override
   void serializeContents() {
