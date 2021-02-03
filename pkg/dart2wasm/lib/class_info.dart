@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:math';
+
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
@@ -10,14 +12,17 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class ClassInfo {
   Class cls;
+  int classId;
+  int depth;
   w.StructType struct;
-  w.ValueType repr;
-  late int depth;
-  late w.DefinedGlobal rtt;
-  late int classId;
-  bool initialized = false;
+  w.DefinedGlobal rtt;
+  ClassInfo? superInfo;
+  late w.ValueType repr;
+  Set<ClassInfo> implementedBy = {};
 
-  ClassInfo(this.cls, this.struct, this.repr);
+  ClassInfo(this.cls, this.classId, this.depth, this.struct, this.rtt) {
+    implementedBy.add(this);
+  }
 }
 
 class ClassInfoCollector {
@@ -27,65 +32,103 @@ class ClassInfoCollector {
 
   ClassInfoCollector(this.translator) : m = translator.m;
 
-  void generateFields(Class cls) {
-    ClassInfo info = translator.classInfo[cls]!;
-    if (!info.initialized) {
+  void initialize(Class cls) {
+    ClassInfo? info = translator.classInfo[cls];
+    if (info == null) {
       Class? superclass = cls.superclass;
       if (superclass == null) {
-        // Object - add class id field
-        info.struct.fields.add(w.FieldType(w.NumType.i32));
-
-        info.depth = 0;
-        info.rtt = m.addGlobal(
-            w.GlobalType(w.Rtt(info.struct, info.depth), mutable: false));
-        w.Instructions b = info.rtt.initializer;
-        b.rtt_canon(info.struct);
+        const int depth = 0;
+        final w.StructType struct = m.addStructType(cls.name);
+        final w.DefinedGlobal rtt =
+            m.addGlobal(w.GlobalType(w.Rtt(struct, depth), mutable: false));
+        final w.Instructions b = rtt.initializer;
+        b.rtt_canon(struct);
         b.end();
+        info = ClassInfo(cls, nextClassId++, depth, struct, rtt);
       } else {
-        generateFields(superclass);
+        initialize(superclass);
+        for (Supertype interface in cls.implementedTypes) {
+          initialize(interface.classNode);
+        }
         ClassInfo superInfo = translator.classInfo[superclass]!;
-        for (w.FieldType fieldType in superInfo.struct.fields) {
-          info.struct.fields.add(fieldType);
-        }
-
-        info.depth = superInfo.depth + 1;
-        info.rtt = m.addGlobal(
-            w.GlobalType(w.Rtt(info.struct, info.depth), mutable: false));
-        w.Instructions b = info.rtt.initializer;
+        final int depth = superInfo.depth + 1;
+        w.StructType struct =
+            cls.fields.where((f) => f.isInstanceMember).isEmpty
+                ? superInfo.struct
+                : m.addStructType(cls.name);
+        final w.DefinedGlobal rtt =
+            m.addGlobal(w.GlobalType(w.Rtt(struct, depth), mutable: false));
+        w.Instructions b = rtt.initializer;
         b.global_get(superInfo.rtt);
-        b.rtt_sub(info.struct);
+        b.rtt_sub(struct);
         b.end();
-      }
-      for (Field field in cls.fields) {
-        DartType fieldType = field.type;
-        if (fieldType is! InterfaceType) {
-          throw "Only interface types supported for fields";
+        info = ClassInfo(cls, nextClassId++, depth, struct, rtt);
+        info.superInfo = superInfo;
+        for (Supertype interface in cls.implementedTypes) {
+          translator.classInfo[interface.classNode]!.implementedBy.add(info);
         }
-        w.ValueType wasmType = translator.translateType(fieldType);
+      }
+      translator.classes.add(info);
+      translator.classInfo[cls] = info;
+    }
+  }
+
+  void computeRepresentation(ClassInfo info) {
+    Set<ClassInfo> reprs = info.implementedBy;
+    while (reprs.length > 1) {
+      int minDepth = translator.classes.length;
+      int maxDepth = 0;
+      for (ClassInfo reprInfo in reprs) {
+        minDepth = min(minDepth, reprInfo.depth);
+        maxDepth = max(maxDepth, reprInfo.depth);
+      }
+      int targetDepth = minDepth == maxDepth ? minDepth - 1 : minDepth;
+      for (ClassInfo reprInfo in reprs.toList()) {
+        if (reprInfo.depth > targetDepth) {
+          reprs.remove(reprInfo);
+          do {
+            reprInfo = reprInfo.superInfo!;
+          } while (reprInfo.depth > targetDepth);
+          reprs.add(reprInfo);
+        }
+      }
+    }
+    info.repr = w.RefType.def(reprs.single.struct, nullable: true);
+  }
+
+  void generateFields(ClassInfo info) {
+    ClassInfo? superInfo = info.superInfo;
+    if (superInfo == null) {
+      // Object - add class id field
+      info.struct.fields.add(w.FieldType(w.NumType.i32));
+    } else if (info.struct != superInfo.struct) {
+      // Copy fields from superclass
+      for (w.FieldType fieldType in superInfo.struct.fields) {
+        info.struct.fields.add(fieldType);
+      }
+    }
+    for (Field field in info.cls.fields) {
+      if (field.isInstanceMember) {
+        w.ValueType wasmType = translator.translateType(field.type);
         translator.fieldIndex[field] = info.struct.fields.length;
         info.struct.fields.add(w.FieldType(wasmType));
       }
-
-      info.classId = nextClassId++;
-      info.initialized = true;
-      translator.classes.add(info);
     }
   }
 
   void collect() {
     for (Library library in translator.component.libraries) {
       for (Class cls in library.classes) {
-        w.StructType structType = m.addStructType(cls.name);
-        // TODO: Have less precise representation type to enable interfaces
-        w.ValueType reprType = w.RefType.def(structType, nullable: true);
-        translator.classInfo[cls] = ClassInfo(cls, structType, reprType);
+        initialize(cls);
       }
     }
 
-    for (Library library in translator.libraries) {
-      for (Class cls in library.classes) {
-        generateFields(cls);
-      }
+    for (ClassInfo info in translator.classes) {
+      computeRepresentation(info);
+    }
+
+    for (ClassInfo info in translator.classes) {
+      generateFields(info);
     }
   }
 }

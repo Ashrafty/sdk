@@ -90,24 +90,27 @@ class Translator {
     assert(type is! VoidType);
     if (type is InterfaceType) {
       if (type.classNode == coreTypes.intClass) {
-        if (type.isPotentiallyNullable) {
-          throw "Nullable int not supported";
+        if (!type.isPotentiallyNullable) {
+          return w.NumType.i64;
         }
-        return w.NumType.i64;
       }
       if (type.classNode == coreTypes.doubleClass) {
-        if (type.isPotentiallyNullable) {
-          throw "Nullable double not supported";
+        if (!type.isPotentiallyNullable) {
+          return w.NumType.f64;
         }
-        return w.NumType.f64;
       }
       if (type.classNode == coreTypes.boolClass) {
-        if (type.isPotentiallyNullable) {
-          throw "Nullable bool not supported";
+        if (!type.isPotentiallyNullable) {
+          return w.NumType.i32;
         }
-        return w.NumType.i32;
       }
       return classInfo[type.classNode]!.repr;
+    }
+    if (type is DynamicType) {
+      return translateType(coreTypes.objectNullableRawType);
+    }
+    if (type is TypeParameterType) {
+      return translateType(type.bound);
     }
     if (type is FunctionType) {
       // TODO
