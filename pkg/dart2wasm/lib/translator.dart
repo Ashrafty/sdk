@@ -61,8 +61,8 @@ class Translator {
       functions[printMember] = printFun;
     }
 
-    FunctionCollector(this).collect();
     dispatchTable.build();
+    FunctionCollector(this).collect();
     dispatchTable.output();
 
     //mainFunction =
@@ -111,6 +111,9 @@ class Translator {
     }
     if (type is TypeParameterType) {
       return translateType(type.bound);
+    }
+    if (type is FutureOrType) {
+      return translateType(coreTypes.objectNullableRawType);
     }
     if (type is FunctionType) {
       // TODO

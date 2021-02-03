@@ -34,10 +34,12 @@ class FunctionCollector extends MemberVisitor<void> {
 
   void visitProcedure(Procedure node) {
     if (!node.isAbstract) {
-      DartType? receiverType = node.isInstanceMember
-          ? translator.coreTypes.objectRawType(Nullability.nonNullable)
-          : null;
-      _makeFunction(node, node.function.returnType, receiverType);
+      if (node.isInstanceMember) {
+        translator.functions[node] =
+            m.addFunction(translator.dispatchTable.signatureForTarget(node));
+      } else {
+        _makeFunction(node, node.function.returnType, null);
+      }
     }
   }
 

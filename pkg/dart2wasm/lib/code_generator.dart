@@ -15,6 +15,20 @@ import 'package:dart2wasm/translator.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+class HasThis extends RecursiveVisitor<void> {
+  bool found = false;
+
+  bool hasThis(TreeNode node) {
+    found = false;
+    node.accept(this);
+    return found;
+  }
+
+  void visitThisExpression(ThisExpression node) {
+    found = true;
+  }
+}
+
 class CodeGenerator extends Visitor<void> {
   Translator translator;
 
@@ -69,11 +83,16 @@ class CodeGenerator extends Visitor<void> {
       visitList(member.initializers, this);
     } else if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
-      thisLocal = function.addLocal(info.repr);
-      b.local_get(function.locals[0]);
-      b.global_get(info.rtt);
-      b.ref_cast();
-      b.local_set(thisLocal!);
+      if (function.locals[0].type == info.repr ||
+          !HasThis().hasThis(member.function.body)) {
+        thisLocal = function.locals[0];
+      } else {
+        thisLocal = function.addLocal(info.repr);
+        b.local_get(function.locals[0]);
+        b.global_get(info.rtt);
+        b.ref_cast();
+        b.local_set(thisLocal!);
+      }
     } else {
       thisLocal = null;
     }

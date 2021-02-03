@@ -10,11 +10,13 @@ import 'package:kernel/ast.dart';
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class SelectorInfo {
-  final List<int> classes = [];
-  late final int offset;
-  final w.FunctionType signature;
+  final Procedure example;
 
-  SelectorInfo(this.signature);
+  final List<ClassInfo> classes = [];
+  late final int offset;
+  late final w.FunctionType signature;
+
+  SelectorInfo(this.example);
 }
 
 class DispatchTable {
@@ -36,6 +38,10 @@ class DispatchTable {
     return selectorInfo[_idForMember(target)]!.offset;
   }
 
+  w.FunctionType signatureForTarget(Procedure target) {
+    return selectorInfo[_idForMember(target)]!.signature;
+  }
+
   void build() {
     // Collect class/selector combinations
     List<List<int>> selectorsInClass = [];
@@ -46,27 +52,22 @@ class DispatchTable {
         int superId = translator.classInfo[superclass]!.classId;
         selectorIds = List.of(selectorsInClass[superId]);
         for (int selectorId in selectorIds) {
-          selectorInfo[selectorId]!.classes.add(info.classId);
+          selectorInfo[selectorId]!.classes.add(info);
         }
       }
 
       for (Member member in info.cls.members) {
-        if (member is Procedure &&
-            member.isInstanceMember &&
-            !member.isAbstract &&
-            translator.functions.containsKey(member)) {
+        if (member is Procedure && member.isInstanceMember) {
           int selectorId = _idForMember(member);
           SelectorInfo? selector = selectorInfo[selectorId];
           if (selector != null) {
             if (selector.classes.last != info.classId) {
-              selector.classes.add(info.classId);
+              selector.classes.add(info);
               selectorIds.add(selectorId);
             }
           } else {
-            // TODO: Merge signatures
-            w.FunctionType signature = translator.functions[member]!.type;
-            selector = selectorInfo[selectorId] = SelectorInfo(signature);
-            selector.classes.add(info.classId);
+            selector = selectorInfo[selectorId] = SelectorInfo(member);
+            selector.classes.add(info);
             selectorIds.add(selectorId);
           }
         }
@@ -74,11 +75,27 @@ class DispatchTable {
       selectorsInClass.add(selectorIds);
     }
 
+    // Compute signatures
+    for (SelectorInfo selector in selectorInfo.values) {
+      ClassInfo receiver = upperBound(selector.classes);
+      FunctionNode function = selector.example.function;
+      List<w.ValueType> inputs = [
+        InterfaceType(receiver.cls, Nullability.nonNullable),
+        ...function.positionalParameters.map((p) => p.type)
+      ].map((t) => translator.translateType(t)).toList();
+      List<w.ValueType> outputs = function.returnType is VoidType
+          ? const []
+          : [translator.translateType(function.returnType)];
+      selector.signature = translator.m.addFunctionType(inputs, outputs);
+    }
+
     // Quick and wasteful offset assignment
     int nextAvailable = 0;
     for (SelectorInfo selector in selectorInfo.values) {
-      selector.offset = nextAvailable - selector.classes.first;
-      nextAvailable += selector.classes.last - selector.classes.first + 1;
+      ClassInfo first = selector.classes.first;
+      ClassInfo last = selector.classes.last;
+      selector.offset = nextAvailable - first.classId;
+      nextAvailable += last.classId - first.classId + 1;
     }
 
     // Fill table
@@ -96,8 +113,7 @@ class DispatchTable {
       for (Member member in info.cls.members) {
         if (member is Procedure &&
             member.isInstanceMember &&
-            !member.isAbstract &&
-            translator.functions.containsKey(member)) {
+            !member.isAbstract) {
           int selectorId = _idForMember(member);
           SelectorInfo selector = selectorInfo[selectorId]!;
           table[selector.offset + info.classId] = member;

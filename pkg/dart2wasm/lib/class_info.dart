@@ -18,11 +18,32 @@ class ClassInfo {
   w.DefinedGlobal rtt;
   ClassInfo? superInfo;
   late w.ValueType repr;
-  Set<ClassInfo> implementedBy = {};
+  List<ClassInfo> implementedBy = [];
 
   ClassInfo(this.cls, this.classId, this.depth, this.struct, this.rtt) {
     implementedBy.add(this);
   }
+}
+
+ClassInfo upperBound(Iterable<ClassInfo> classes) {
+  while (classes.length > 1) {
+    Set<ClassInfo> newClasses = {};
+    int minDepth = 999999999;
+    int maxDepth = 0;
+    for (ClassInfo info in classes) {
+      minDepth = min(minDepth, info.depth);
+      maxDepth = max(maxDepth, info.depth);
+    }
+    int targetDepth = minDepth == maxDepth ? minDepth - 1 : minDepth;
+    for (ClassInfo info in classes) {
+      while (info.depth > targetDepth) {
+        info = info.superInfo!;
+      }
+      newClasses.add(info);
+    }
+    classes = newClasses;
+  }
+  return classes.single;
 }
 
 class ClassInfoCollector {
@@ -74,26 +95,8 @@ class ClassInfoCollector {
   }
 
   void computeRepresentation(ClassInfo info) {
-    Set<ClassInfo> reprs = info.implementedBy;
-    while (reprs.length > 1) {
-      int minDepth = translator.classes.length;
-      int maxDepth = 0;
-      for (ClassInfo reprInfo in reprs) {
-        minDepth = min(minDepth, reprInfo.depth);
-        maxDepth = max(maxDepth, reprInfo.depth);
-      }
-      int targetDepth = minDepth == maxDepth ? minDepth - 1 : minDepth;
-      for (ClassInfo reprInfo in reprs.toList()) {
-        if (reprInfo.depth > targetDepth) {
-          reprs.remove(reprInfo);
-          do {
-            reprInfo = reprInfo.superInfo!;
-          } while (reprInfo.depth > targetDepth);
-          reprs.add(reprInfo);
-        }
-      }
-    }
-    info.repr = w.RefType.def(reprs.single.struct, nullable: true);
+    ClassInfo upper = upperBound(info.implementedBy);
+    info.repr = w.RefType.def(upper.struct, nullable: true);
   }
 
   void generateFields(ClassInfo info) {
