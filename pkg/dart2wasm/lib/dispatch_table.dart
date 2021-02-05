@@ -12,7 +12,7 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 class SelectorInfo {
   final Procedure example;
 
-  final List<ClassInfo> classes = [];
+  final Map<int, Procedure> classes = {};
   late final int offset;
   late final w.FunctionType signature;
 
@@ -47,12 +47,13 @@ class DispatchTable {
     List<List<int>> selectorsInClass = [];
     for (ClassInfo info in translator.classes) {
       List<int> selectorIds = [];
-      Class? superclass = info.cls.superclass;
-      if (superclass != null) {
-        int superId = translator.classInfo[superclass]!.classId;
+      ClassInfo? superInfo = info.superInfo;
+      if (superInfo != null) {
+        int superId = superInfo.classId;
         selectorIds = List.of(selectorsInClass[superId]);
         for (int selectorId in selectorIds) {
-          selectorInfo[selectorId]!.classes.add(info);
+          SelectorInfo selector = selectorInfo[selectorId]!;
+          selector.classes[info.classId] = selector.classes[superId]!;
         }
       }
 
@@ -60,16 +61,20 @@ class DispatchTable {
         if (member is Procedure && member.isInstanceMember) {
           int selectorId = _idForMember(member);
           SelectorInfo? selector = selectorInfo[selectorId];
-          if (selector != null) {
-            if (selector.classes.last != info.classId) {
-              selector.classes.add(info);
-              selectorIds.add(selectorId);
-            }
-          } else {
+          if (selector == null) {
             selector = selectorInfo[selectorId] = SelectorInfo(member);
-            selector.classes.add(info);
-            selectorIds.add(selectorId);
+          } else {
+            //FunctionType f1 = selector.example.function
+            //    .computeFunctionType(Nullability.nonNullable);
+            //FunctionType f2 =
+            //    member.function.computeFunctionType(Nullability.nonNullable);
+            //assert(
+            //    f1 == f2,
+            //    "Changing function type on override not supported: "
+            //    "$f1 $f2");
           }
+          selector.classes[info.classId] = member;
+          selectorIds.add(selectorId);
         }
       }
       selectorsInClass.add(selectorIds);
@@ -77,7 +82,8 @@ class DispatchTable {
 
     // Compute signatures
     for (SelectorInfo selector in selectorInfo.values) {
-      ClassInfo receiver = upperBound(selector.classes);
+      ClassInfo receiver =
+          upperBound(selector.classes.keys.map((id) => translator.classes[id]));
       FunctionNode function = selector.example.function;
       List<w.ValueType> inputs = [
         InterfaceType(receiver.cls, Nullability.nonNullable),
@@ -92,32 +98,24 @@ class DispatchTable {
     // Quick and wasteful offset assignment
     int nextAvailable = 0;
     for (SelectorInfo selector in selectorInfo.values) {
-      ClassInfo first = selector.classes.first;
-      ClassInfo last = selector.classes.last;
-      selector.offset = nextAvailable - first.classId;
-      nextAvailable += last.classId - first.classId + 1;
+      List<int> classIds = selector.classes.keys
+          .where((id) => !translator.classes[id].cls.isAbstract)
+          .toList()
+            ..sort();
+      if (classIds.isNotEmpty) {
+        selector.offset = nextAvailable - classIds.first;
+        nextAvailable += classIds.last - classIds.first + 1;
+      }
     }
+    //print("Dispatch table size: $nextAvailable");
 
     // Fill table
     table = List.filled(nextAvailable, null);
-    for (ClassInfo info in translator.classes) {
-      Class? superclass = info.cls.superclass;
-      if (superclass != null) {
-        int superId = translator.classInfo[superclass]!.classId;
-        for (int selectorId in selectorsInClass[superId]) {
-          int offset = selectorInfo[selectorId]!.offset;
-          table[offset + info.classId] = table[offset + superId];
-          //print("$offset + ${info.classId} = ${table[offset + superId]}");
-        }
-      }
-      for (Member member in info.cls.members) {
-        if (member is Procedure &&
-            member.isInstanceMember &&
-            !member.isAbstract) {
-          int selectorId = _idForMember(member);
-          SelectorInfo selector = selectorInfo[selectorId]!;
-          table[selector.offset + info.classId] = member;
-          //print("${selector.offset} + ${info.classId} := $member");
+    for (SelectorInfo selector in selectorInfo.values) {
+      for (int classId in selector.classes.keys) {
+        if (!translator.classes[classId].cls.isAbstract) {
+          assert(table[selector.offset + classId] == null);
+          table[selector.offset + classId] = selector.classes[classId];
         }
       }
     }

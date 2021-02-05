@@ -42,6 +42,8 @@ class CodeGenerator extends Visitor<void> {
 
   CodeGenerator(this.translator);
 
+  ClassInfo get object => translator.classes[0];
+
   void defaultNode(Node node) {
     throw "Not supported: ${node.runtimeType}";
   }
@@ -310,16 +312,76 @@ class CodeGenerator extends Visitor<void> {
     SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
 
     // Receiver is already on stack.
-    w.StructType objectStruct = translator.classes[0].struct;
-    w.Local temp =
-        function.addLocal(w.RefType.def(objectStruct, nullable: true));
-    b.local_tee(temp);
+    w.Local receiver =
+        function.addLocal(w.RefType.def(object.struct, nullable: true));
+    b.local_tee(receiver);
     arguments.accept(this);
+
+    if (translator.optionPolymorphicSpecialization) {
+      return _polymorphicSpecialization(selector, receiver);
+    }
+
     b.i32_const(selector.offset);
-    b.local_get(temp);
-    b.struct_get(objectStruct, 0);
+    b.local_get(receiver);
+    b.struct_get(object.struct, 0);
     b.i32_add();
     b.call_indirect(selector.signature);
+  }
+
+  void _polymorphicSpecialization(SelectorInfo selector, w.Local receiver) {
+    Map<int, Procedure> implementations = Map.from(selector.classes);
+    implementations.removeWhere((id, target) => target.isAbstract);
+
+    w.Local idVar = function.addLocal(w.NumType.i32);
+    b.local_get(receiver);
+    b.struct_get(object.struct, 0);
+    b.local_set(idVar);
+
+    w.Label block =
+        b.block(selector.signature.inputs, selector.signature.outputs);
+    calls:
+    while (Set.from(implementations.values).length > 1) {
+      for (int id in implementations.keys) {
+        Procedure target = implementations[id]!;
+        if (implementations.values.where((t) => t == target).length == 1) {
+          // Single class id implements method.
+          b.local_get(idVar);
+          b.i32_const(id);
+          b.i32_eq();
+          b.if_(selector.signature.inputs, selector.signature.inputs);
+          b.call(translator.functions[target]!);
+          b.br(block);
+          b.end();
+          implementations.remove(id);
+          continue calls;
+        }
+      }
+      // Find class id that separates remaining classes in two.
+      List<int> sorted = implementations.keys.toList()..sort();
+      int pivotId = sorted.firstWhere(
+          (id) => implementations[id] != implementations[sorted.first]);
+      // Fail compilation if no such id exists.
+      assert(sorted.lastWhere(
+              (id) => implementations[id] != implementations[pivotId]) ==
+          pivotId - 1);
+      Procedure target = implementations[sorted.first]!;
+      b.local_get(idVar);
+      b.i32_const(pivotId);
+      b.i32_lt_u();
+      b.if_(selector.signature.inputs, selector.signature.inputs);
+      b.call(translator.functions[target]!);
+      b.br(block);
+      b.end();
+      for (int id in sorted) {
+        if (id == pivotId) break;
+        implementations.remove(id);
+      }
+      continue calls;
+    }
+    // Call remaining implementation.
+    Procedure target = implementations.values.first;
+    b.call(translator.functions[target]!);
+    b.end();
   }
 
   @override

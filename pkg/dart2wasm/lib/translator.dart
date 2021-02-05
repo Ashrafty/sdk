@@ -19,6 +19,10 @@ import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class Translator {
+  final bool optionPrintKernel;
+  final bool optionPrintWasm;
+  final bool optionPolymorphicSpecialization;
+
   Component component;
   List<Library> libraries;
   CoreTypes coreTypes;
@@ -38,7 +42,10 @@ class Translator {
   late w.Module m;
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
-      this.tableSelectorAssigner)
+      this.tableSelectorAssigner,
+      {this.optionPrintKernel = false,
+      this.optionPrintWasm = false,
+      this.optionPolymorphicSpecialization = false})
       : libraries = [component.libraries.first],
         hierarchy =
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
@@ -75,11 +82,13 @@ class Translator {
     for (Member member in functions.keys) {
       w.BaseFunction function = functions[member]!;
       if (function is w.DefinedFunction) {
-        //print("#${function.index}: $member");
-        //print(member.function.body);
+        if (optionPrintKernel || optionPrintWasm) {
+          print("#${function.index}: $member");
+        }
+        if (optionPrintKernel) print(member.function.body);
         m.exportFunction(member.toString(), function);
         codeGen.generate(member, function);
-        //print(function.body.trace);
+        if (optionPrintWasm) print(function.body.trace);
       }
     }
 

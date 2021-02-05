@@ -107,20 +107,33 @@ class WasmTarget extends Target {
 }
 
 main(List<String> args) async {
-  String input = args[0];
+  List<String> nonOptions = [];
+  Map<String, bool> options = {};
+  for (String arg in args) {
+    if (arg.startsWith("--no-")) {
+      options[arg.substring(5)] = false;
+    } else if (arg.startsWith("--")) {
+      options[arg.substring(2)] = true;
+    } else {
+      nonOptions.add(arg);
+    }
+  }
+  String input = nonOptions[0];
+  String output = nonOptions[1];
   Uri mainUri = resolveInputUri(input);
 
   TargetFlags targetFlags = TargetFlags(enableNullSafety: true);
   Target target = WasmTarget();
 
-  CompilerOptions options = CompilerOptions()
+  CompilerOptions compilerOptions = CompilerOptions()
     ..target = target
     ..compileSdk = true
     ..sdkRoot = Uri.file(Directory("sdk").absolute.path)
     ..environmentDefines = {}
-    ..verbose = true;
+    ..verbose = false;
 
-  CompilerResult compilerResult = await kernelForProgram(mainUri, options);
+  CompilerResult compilerResult =
+      await kernelForProgram(mainUri, compilerOptions);
   Component component = compilerResult.component;
 
   Procedure printMember = component.libraries
@@ -144,6 +157,10 @@ main(List<String> args) async {
       component,
       compilerResult.coreTypes,
       TypeEnvironment(compilerResult.coreTypes, compilerResult.classHierarchy),
-      tableSelectorAssigner);
-  File(args[1]).writeAsBytesSync(translator.translate().encode());
+      tableSelectorAssigner,
+      optionPrintKernel: options["print-kernel"] ?? false,
+      optionPrintWasm: options["print-wasm"] ?? false,
+      optionPolymorphicSpecialization:
+          options["polymorphic-specialization"] ?? false);
+  File(output).writeAsBytesSync(translator.translate().encode());
 }
