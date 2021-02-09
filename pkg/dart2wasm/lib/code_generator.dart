@@ -34,6 +34,8 @@ class CodeGenerator extends Visitor<void> {
 
   late Member member;
   late StaticTypeContext typeContext;
+  late List<w.Local> paramLocals;
+  w.Label? returnLabel;
 
   Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
@@ -52,7 +54,8 @@ class CodeGenerator extends Visitor<void> {
     throw "Not supported: ${node.runtimeType}";
   }
 
-  void generate(Member member, w.DefinedFunction function) {
+  void generate(Member member, w.DefinedFunction function,
+      {List<w.Local>? inlinedLocals, w.Label? returnLabel}) {
     if (member.isExternal) {
       print("External member: $member");
       return;
@@ -60,19 +63,21 @@ class CodeGenerator extends Visitor<void> {
 
     this.member = member;
     typeContext = StaticTypeContext(member, translator.typeEnvironment);
+    paramLocals = inlinedLocals ?? function.locals;
+    this.returnLabel = returnLabel;
 
     List<VariableDeclaration> params = member.function.positionalParameters;
-    int implicitParams = function.locals.length - params.length;
+    int implicitParams = paramLocals.length - params.length;
     assert(implicitParams == 0 || implicitParams == 1);
     for (int i = 0; i < params.length; i++) {
-      locals[params[i]] = function.locals[implicitParams + i];
+      locals[params[i]] = paramLocals[implicitParams + i];
     }
 
     this.function = function;
     b = function.body;
     if (member is Constructor) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
-      thisLocal = function.locals[0];
+      thisLocal = paramLocals[0];
       Class cls = member.enclosingClass;
       for (Field field in cls.fields) {
         if (field.isInstanceMember && field.initializer != null) {
@@ -85,12 +90,12 @@ class CodeGenerator extends Visitor<void> {
       visitList(member.initializers, this);
     } else if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
-      if (function.locals[0].type == info.repr ||
+      if (paramLocals[0].type == info.repr ||
           !HasThis().hasThis(member.function.body)) {
-        thisLocal = function.locals[0];
+        thisLocal = paramLocals[0];
       } else {
         thisLocal = function.addLocal(info.repr);
-        b.local_get(function.locals[0]);
+        b.local_get(paramLocals[0]);
         b.global_get(info.rtt);
         b.ref_cast();
         b.local_set(thisLocal!);
@@ -100,6 +105,22 @@ class CodeGenerator extends Visitor<void> {
     }
     member.function.body.accept(this);
     b.end();
+  }
+
+  void _call(Member target) {
+    w.BaseFunction targetFunction = translator.functions[target]!;
+    if (translator.shouldInline(target)) {
+      List<w.Local> inlinedLocals =
+          targetFunction.type.inputs.map((t) => function.addLocal(t)).toList();
+      for (w.Local local in inlinedLocals.reversed) {
+        b.local_set(local);
+      }
+      w.Label block = b.block([], targetFunction.type.outputs);
+      CodeGenerator(translator).generate(target, function,
+          inlinedLocals: inlinedLocals, returnLabel: block);
+    } else {
+      b.call(targetFunction);
+    }
   }
 
   void visitFieldInitializer(FieldInitializer node) {
@@ -119,7 +140,7 @@ class CodeGenerator extends Visitor<void> {
     }
     b.local_get(thisLocal!);
     node.arguments.accept(this);
-    b.call(translator.functions[node.target]!);
+    _call(node.target!);
   }
 
   void visitBlock(Block node) {
@@ -203,7 +224,11 @@ class CodeGenerator extends Visitor<void> {
 
   void visitReturnStatement(ReturnStatement node) {
     node.visitChildren(this);
-    b.return_();
+    if (returnLabel != null) {
+      b.br(returnLabel!);
+    } else {
+      b.return_();
+    }
   }
 
   void visitLet(Let node) {
@@ -224,7 +249,7 @@ class CodeGenerator extends Visitor<void> {
     b.struct_set(info.struct, 0);
     b.local_get(temp);
     node.arguments.accept(this);
-    b.call(translator.functions[node.target]!);
+    _call(node.target);
     b.local_get(temp);
   }
 
@@ -235,15 +260,13 @@ class CodeGenerator extends Visitor<void> {
       b.ref_eq();
       return;
     }
-    w.BaseFunction target = translator.functions[node.target]!;
-    b.call(target);
+    _call(node.target);
   }
 
   void visitSuperMethodInvocation(SuperMethodInvocation node) {
     b.local_get(thisLocal!);
     node.arguments.accept(this);
-    w.BaseFunction target = translator.functions[node.interfaceTarget]!;
-    b.call(target);
+    _call(node.interfaceTarget);
   }
 
   void visitInstanceInvocation(InstanceInvocation node) {
@@ -300,8 +323,7 @@ class CodeGenerator extends Visitor<void> {
         .getSingleTargetForInterfaceInvocation(interfaceTarget, setter: setter);
     if (singleTarget != null) {
       arguments.accept(this);
-      w.BaseFunction target = translator.functions[singleTarget]!;
-      b.call(target);
+      _call(singleTarget);
       return;
     }
 
@@ -349,7 +371,7 @@ class CodeGenerator extends Visitor<void> {
           b.i32_const(id);
           b.i32_eq();
           b.if_(selector.signature.inputs, selector.signature.inputs);
-          b.call(translator.functions[target]!);
+          _call(target);
           b.br(block);
           b.end();
           implementations.remove(id);
@@ -369,7 +391,7 @@ class CodeGenerator extends Visitor<void> {
       b.i32_const(pivotId);
       b.i32_lt_u();
       b.if_(selector.signature.inputs, selector.signature.inputs);
-      b.call(translator.functions[target]!);
+      _call(target);
       b.br(block);
       b.end();
       for (int id in sorted) {
@@ -380,7 +402,7 @@ class CodeGenerator extends Visitor<void> {
     }
     // Call remaining implementation.
     Procedure target = implementations.values.first;
-    b.call(translator.functions[target]!);
+    _call(target);
     b.end();
   }
 

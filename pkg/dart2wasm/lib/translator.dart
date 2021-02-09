@@ -22,6 +22,7 @@ class Translator {
   final bool optionPrintKernel;
   final bool optionPrintWasm;
   final bool optionPolymorphicSpecialization;
+  final bool optionInlning;
 
   Component component;
   List<Library> libraries;
@@ -45,7 +46,8 @@ class Translator {
       this.tableSelectorAssigner,
       {this.optionPrintKernel = false,
       this.optionPrintWasm = false,
-      this.optionPolymorphicSpecialization = false})
+      this.optionPolymorphicSpecialization = false,
+      this.optionInlning = false})
       : libraries = [component.libraries.first],
         hierarchy =
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
@@ -129,5 +131,26 @@ class Translator {
       return w.RefType.any();
     }
     throw "Unsupported type ${type.runtimeType}";
+  }
+
+  bool shouldInline(Member target) {
+    if (!optionInlning) return false;
+    Statement? body = target.function.body;
+    return body != null && NodeCounter().countNodes(body) < 5;
+  }
+}
+
+class NodeCounter extends Visitor<void> {
+  int count = 0;
+
+  int countNodes(Node node) {
+    count = 0;
+    node.accept(this);
+    return count;
+  }
+
+  void defaultNode(Node node) {
+    count++;
+    node.visitChildren(this);
   }
 }

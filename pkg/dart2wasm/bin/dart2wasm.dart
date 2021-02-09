@@ -161,6 +161,7 @@ main(List<String> args) async {
       optionPrintKernel: options["print-kernel"] ?? false,
       optionPrintWasm: options["print-wasm"] ?? false,
       optionPolymorphicSpecialization:
-          options["polymorphic-specialization"] ?? false);
+          options["polymorphic-specialization"] ?? false,
+      optionInlning: options["inlining"] ?? false);
   File(output).writeAsBytesSync(translator.translate().encode());
 }
