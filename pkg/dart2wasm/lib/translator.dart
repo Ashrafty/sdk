@@ -140,7 +140,7 @@ class Translator {
   }
 }
 
-class NodeCounter extends Visitor<void> {
+class NodeCounter extends Visitor<void> with VisitorVoidMixin {
   int count = 0;
 
   int countNodes(Node node) {

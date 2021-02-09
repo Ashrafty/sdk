@@ -15,7 +15,7 @@ import 'package:dart2wasm/translator.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
-class HasThis extends RecursiveVisitor<void> {
+class HasThis extends RecursiveVisitor {
   bool found = false;
 
   bool hasThis(TreeNode node) {
@@ -29,7 +29,7 @@ class HasThis extends RecursiveVisitor<void> {
   }
 }
 
-class CodeGenerator extends Visitor<void> {
+class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   Translator translator;
 
   late Member member;

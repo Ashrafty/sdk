@@ -32,6 +32,8 @@ class FunctionCollector extends MemberVisitor<void> {
     }
   }
 
+  void defaultMember(Member node) {}
+
   void visitProcedure(Procedure node) {
     if (!node.isAbstract) {
       if (node.isInstanceMember) {

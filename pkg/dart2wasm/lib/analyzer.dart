@@ -9,7 +9,7 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 import 'translator.dart';
 
-class Analyzer extends RecursiveVisitor<void> {
+class Analyzer extends RecursiveVisitor {
   Translator translator;
   w.Module m;
 
