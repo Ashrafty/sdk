@@ -13,6 +13,7 @@ import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart'
     show ClassHierarchy, ClassHierarchySubtypes, ClosedWorldClassHierarchy;
 import 'package:kernel/core_types.dart';
+import 'package:kernel/src/printer.dart';
 import 'package:kernel/type_environment.dart';
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 
@@ -41,6 +42,8 @@ class Translator {
   Map<Member, w.BaseFunction> functions = {};
   late Procedure mainFunction;
   late w.Module m;
+
+  Map<DartType, w.ArrayType> arrayTypeCache = {};
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
       this.tableSelectorAssigner,
@@ -87,7 +90,21 @@ class Translator {
         if (optionPrintKernel || optionPrintWasm) {
           print("#${function.index}: $member");
         }
-        if (optionPrintKernel) print(member.function.body);
+        if (optionPrintKernel) {
+          if (member is Constructor) {
+            Class cls = member.enclosingClass;
+            for (Field field in cls.fields) {
+              if (field.isInstanceMember && field.initializer != null) {
+                print("${field.name}: ${field.initializer}");
+              }
+            }
+            for (Initializer initializer in member.initializers) {
+              print(initializer);
+            }
+          }
+          print(member.function.body);
+          if (!optionPrintWasm) print("");
+        }
         m.exportFunction(member.toString(), function);
         codeGen.generate(member, function);
         if (optionPrintWasm) print(function.body.trace);
@@ -115,6 +132,10 @@ class Translator {
           return w.NumType.i32;
         }
       }
+      if (type.classNode == coreTypes.listClass) {
+        DartType typeArg = type.typeArguments.single;
+        return w.RefType.def(arrayType(typeArg), nullable: true);
+      }
       return classInfo[type.classNode]!.repr;
     }
     if (type is DynamicType) {
@@ -131,6 +152,13 @@ class Translator {
       return w.RefType.any();
     }
     throw "Unsupported type ${type.runtimeType}";
+  }
+
+  w.ArrayType arrayType(DartType type) {
+    return arrayTypeCache.putIfAbsent(
+        type,
+        () => m.addArrayType("List<${type.toText(defaultAstTextStrategy)}>")
+          ..elementType = w.FieldType(translateType(type)));
   }
 
   bool shouldInline(Member target) {

@@ -254,6 +254,11 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitStaticInvocation(StaticInvocation node) {
+    Intrinsic? intrinsic = translator.intrinsics.getStaticIntrinsic(node, this);
+    if (intrinsic != null) {
+      intrinsic(this);
+      return;
+    }
     node.arguments.accept(this);
     if (node.target == translator.coreTypes.identicalProcedure) {
       // TODO: Check for reference types

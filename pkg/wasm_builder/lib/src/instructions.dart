@@ -527,7 +527,8 @@ class Instructions with SerializerMixin {
   }
 
   void array_new_with_rtt(ArrayType arrayType) {
-    assert(_verifyTypes([arrayType.elementType.type.unpacked, Rtt(arrayType)],
+    assert(_verifyTypes(
+        [arrayType.elementType.type.unpacked, NumType.i32, Rtt(arrayType)],
         [RefType.def(arrayType, nullable: false)],
         trace: ['array.new_with_rtt', arrayType]));
     writeBytes(const [0xFB, 0x11]);
@@ -535,8 +536,8 @@ class Instructions with SerializerMixin {
   }
 
   void array_new_default_with_rtt(ArrayType arrayType) {
-    assert(_verifyTypes(
-        [Rtt(arrayType)], [RefType.def(arrayType, nullable: false)],
+    assert(_verifyTypes([NumType.i32, Rtt(arrayType)],
+        [RefType.def(arrayType, nullable: false)],
         trace: ['array.new_default_with_rtt', arrayType]));
     writeBytes(const [0xFB, 0x12]);
     writeUnsigned(arrayType.index);

@@ -6,6 +6,8 @@ import 'package:dart2wasm/translator.dart';
 import 'package:dart2wasm/code_generator.dart';
 import 'package:kernel/ast.dart';
 
+import 'package:wasm_builder/wasm_builder.dart' as w;
+
 typedef Intrinsic = void Function(CodeGenerator codeGen);
 
 class Intrinsics {
@@ -36,6 +38,8 @@ class Intrinsics {
         '&': {intType: (c) => c.b.i64_and()},
         '|': {intType: (c) => c.b.i64_or()},
         '^': {intType: (c) => c.b.i64_xor()},
+        '<<': {intType: (c) => c.b.i64_shl()},
+        '>>': {intType: (c) => c.b.i64_shr_s()},
         '<': {intType: (c) => c.b.i64_lt_s()},
         '<=': {intType: (c) => c.b.i64_le_s()},
         '>': {intType: (c) => c.b.i64_gt_s()},
@@ -92,6 +96,30 @@ class Intrinsics {
     DartType receiverType =
         invocation.receiver.getStaticType(codeGen.typeContext);
     String name = invocation.name.name;
+    if (invocation.interfaceTarget.enclosingClass ==
+        codeGen.translator.coreTypes.listClass) {
+      DartType elementType =
+          (receiverType as InterfaceType).typeArguments.single;
+      w.ArrayType arrayType = codeGen.translator.arrayType(elementType);
+      switch (name) {
+        case '[]':
+          return (c) {
+            c.b.i32_wrap_i64();
+            c.b.array_get(arrayType);
+          };
+        case '[]=':
+          return (c) {
+            w.Local temp =
+                c.function.addLocal(c.translator.translateType(elementType));
+            c.b.local_set(temp);
+            c.b.i32_wrap_i64();
+            c.b.local_get(temp);
+            c.b.array_set(arrayType);
+          };
+        default:
+          throw "Unsupported list operator: $name";
+      }
+    }
     if (invocation.arguments.positional.length == 1) {
       // Binary operator
       DartType argType =
@@ -108,5 +136,20 @@ class Intrinsics {
     DartType leftType = node.left.getStaticType(codeGen.typeContext);
     DartType rightType = node.right.getStaticType(codeGen.typeContext);
     return equalsMap[leftType]?[rightType]?[node.isNot];
+  }
+
+  Intrinsic? getStaticIntrinsic(StaticInvocation node, CodeGenerator codeGen) {
+    if (node.target.enclosingClass == codeGen.translator.coreTypes.listClass &&
+        node.name.name == "filled") {
+      return (c) {
+        // TODO: Support filling with other than default value
+        w.ArrayType arrayType =
+            c.translator.arrayType(node.arguments.types.single);
+        node.arguments.positional.first.accept(c);
+        c.b.i32_wrap_i64();
+        c.b.rtt_canon(arrayType);
+        c.b.array_new_default_with_rtt(arrayType);
+      };
+    }
   }
 }
