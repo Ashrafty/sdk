@@ -174,32 +174,83 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
-  void visitIfStatement(IfStatement node) {
-    node.condition.accept(this);
-    b.if_();
-    node.then.accept(this);
-    Statement? otherwise = node.otherwise;
-    if (otherwise != null) {
-      b.else_();
-      otherwise.accept(this);
+  bool _hasLogicalOperator(Expression condition) {
+    while (condition is Not) condition = condition.operand;
+    return condition is LogicalExpression;
+  }
+
+  void _branchIf(Expression condition, w.Label target,
+      {required bool negated}) {
+    while (condition is Not) {
+      negated = !negated;
+      condition = condition.operand;
     }
-    b.end();
+    if (condition is LogicalExpression) {
+      bool isConjunctive =
+          (condition.operatorEnum == LogicalExpressionOperator.AND) ^ negated;
+      if (isConjunctive) {
+        w.Label conditionBlock = b.block();
+        _branchIf(condition.left, conditionBlock, negated: !negated);
+        _branchIf(condition.right, target, negated: negated);
+        b.end();
+      } else {
+        _branchIf(condition.left, target, negated: negated);
+        _branchIf(condition.right, target, negated: negated);
+      }
+    } else {
+      condition.accept(this);
+      if (negated) {
+        b.i32_eqz();
+      }
+      b.br_if(target);
+    }
+  }
+
+  void _conditional(Expression condition, TreeNode then, TreeNode? otherwise,
+      List<w.ValueType> result) {
+    if (!_hasLogicalOperator(condition)) {
+      // Simple condition
+      condition.accept(this);
+      b.if_(const [], result);
+      then.accept(this);
+      if (otherwise != null) {
+        b.else_();
+        otherwise.accept(this);
+      }
+      b.end();
+    } else {
+      // Complex condition
+      w.Label ifBlock = b.block(const [], result);
+      if (otherwise != null) {
+        w.Label elseBlock = b.block();
+        _branchIf(condition, elseBlock, negated: true);
+        then.accept(this);
+        b.br(ifBlock);
+        b.end();
+        otherwise.accept(this);
+      } else {
+        _branchIf(condition, ifBlock, negated: true);
+        then.accept(this);
+      }
+      b.end();
+    }
+  }
+
+  void visitIfStatement(IfStatement node) {
+    _conditional(node.condition, node.then, node.otherwise, const []);
   }
 
   void visitDoStatement(DoStatement node) {
     w.Label loop = b.loop();
     node.body.accept(this);
-    node.condition.accept(this);
-    b.br_if(loop);
+    _branchIf(node.condition, loop, negated: false);
     b.end();
   }
 
   void visitWhileStatement(WhileStatement node) {
     w.Label block = b.block();
     w.Label loop = b.loop();
-    node.condition.accept(this);
-    b.i32_eqz();
-    b.br_if(block);
+    _branchIf(node.condition, block, negated: true);
     node.body.accept(this);
     b.br(loop);
     b.end();
@@ -210,9 +261,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     visitList(node.variables, this);
     w.Label block = b.block();
     w.Label loop = b.loop();
-    node.condition.accept(this);
-    b.i32_eqz();
-    b.br_if(block);
+    _branchIf(node.condition, block, negated: true);
     node.body.accept(this);
     for (Expression update in node.updates) {
       _visitVoidExpression(update);
@@ -469,15 +518,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitLogicalExpression(LogicalExpression node) {
-    w.Label block = b.block([], [w.NumType.i32]);
-    bool isAnd = node.operatorEnum == LogicalExpressionOperator.AND;
-    b.i32_const(isAnd ? 0 : 1);
-    node.left.accept(this);
-    if (isAnd) b.i32_eqz();
-    b.br_if(block);
-    b.drop();
-    node.right.accept(this);
-    b.end();
+    _conditional(
+        node, BoolLiteral(true), BoolLiteral(false), const [w.NumType.i32]);
   }
 
   void visitNot(Not node) {
@@ -488,12 +530,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   void visitConditionalExpression(ConditionalExpression node) {
     w.ValueType type =
         translator.translateType(node.getStaticType(typeContext));
-    node.condition.accept(this);
-    b.if_([], [type]);
-    node.then.accept(this);
-    b.else_();
-    node.otherwise.accept(this);
-    b.end();
+    _conditional(node.condition, node.then, node.otherwise, [type]);
   }
 
   void visitNullCheck(NullCheck node) {
