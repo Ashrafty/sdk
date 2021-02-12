@@ -17,7 +17,7 @@ class ClassInfo {
   w.StructType struct;
   w.DefinedGlobal rtt;
   ClassInfo? superInfo;
-  late w.ValueType repr;
+  late w.RefType repr;
   List<ClassInfo> implementedBy = [];
 
   ClassInfo(this.cls, this.classId, this.depth, this.struct, this.rtt) {
@@ -112,7 +112,8 @@ class ClassInfoCollector {
     }
     for (Field field in info.cls.fields) {
       if (field.isInstanceMember) {
-        w.ValueType wasmType = translator.translateType(field.type);
+        w.ValueType wasmType =
+            translator.translateType(field.type).withNullability(true);
         translator.fieldIndex[field] = info.struct.fields.length;
         info.struct.fields.add(w.FieldType(wasmType));
       }

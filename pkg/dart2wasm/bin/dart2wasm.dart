@@ -158,10 +158,11 @@ main(List<String> args) async {
       compilerResult.coreTypes,
       TypeEnvironment(compilerResult.coreTypes, compilerResult.classHierarchy),
       tableSelectorAssigner,
-      optionPrintKernel: options["print-kernel"] ?? false,
-      optionPrintWasm: options["print-wasm"] ?? false,
+      optionInlning: options["inlining"] ?? false,
+      optionParameterNullability: options["parameter-nullability"] ?? false,
       optionPolymorphicSpecialization:
           options["polymorphic-specialization"] ?? false,
-      optionInlning: options["inlining"] ?? false);
+      optionPrintKernel: options["print-kernel"] ?? false,
+      optionPrintWasm: options["print-wasm"] ?? false);
   File(output).writeAsBytesSync(translator.translate().encode());
 }

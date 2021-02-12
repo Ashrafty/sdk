@@ -20,10 +20,11 @@ import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class Translator {
+  final bool optionInlning;
+  final bool optionParameterNullability;
+  final bool optionPolymorphicSpecialization;
   final bool optionPrintKernel;
   final bool optionPrintWasm;
-  final bool optionPolymorphicSpecialization;
-  final bool optionInlning;
 
   Component component;
   List<Library> libraries;
@@ -47,10 +48,11 @@ class Translator {
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
       this.tableSelectorAssigner,
-      {this.optionPrintKernel = false,
-      this.optionPrintWasm = false,
-      this.optionPolymorphicSpecialization = false,
-      this.optionInlning = false})
+      {required this.optionInlning,
+      required this.optionParameterNullability,
+      required this.optionPolymorphicSpecialization,
+      required this.optionPrintKernel,
+      required this.optionPrintWasm})
       : libraries = [component.libraries.first],
         hierarchy =
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
@@ -136,7 +138,8 @@ class Translator {
         DartType typeArg = type.typeArguments.single;
         return w.RefType.def(arrayType(typeArg), nullable: true);
       }
-      return classInfo[type.classNode]!.repr;
+      return classInfo[type.classNode]!.repr.withNullability(
+          !optionParameterNullability || type.isPotentiallyNullable);
     }
     if (type is DynamicType) {
       return translateType(coreTypes.objectNullableRawType);
