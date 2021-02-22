@@ -84,7 +84,7 @@ class DispatchTable {
     for (SelectorInfo selector in selectorInfo.values) {
       ClassInfo receiver =
           upperBound(selector.classes.keys.map((id) => translator.classes[id]));
-      FunctionNode function = selector.example.function;
+      FunctionNode function = selector.example.function!;
       List<w.ValueType> inputs = [
         InterfaceType(receiver.cls, Nullability.nonNullable),
         ...function.positionalParameters.map((p) => p.type)

@@ -66,7 +66,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     paramLocals = inlinedLocals ?? function.locals;
     this.returnLabel = returnLabel;
 
-    List<VariableDeclaration> params = member.function.positionalParameters;
+    List<VariableDeclaration> params = member.function!.positionalParameters;
     int implicitParams = paramLocals.length - params.length;
     assert(implicitParams == 0 || implicitParams == 1);
     for (int i = 0; i < params.length; i++) {
@@ -78,7 +78,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (member is Constructor) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       thisLocal = paramLocals[0];
-      Class cls = member.enclosingClass;
+      Class cls = member.enclosingClass!;
       for (Field field in cls.fields) {
         if (field.isInstanceMember && field.initializer != null) {
           int fieldIndex = translator.fieldIndex[field]!;
@@ -91,7 +91,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     } else if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       if ((paramLocals[0].type as w.RefType).heapType == info.repr.heapType ||
-          !HasThis().hasThis(member.function.body)) {
+          !HasThis().hasThis(member.function!.body!)) {
         thisLocal = paramLocals[0];
       } else {
         thisLocal = function.addLocal(info.repr);
@@ -103,7 +103,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     } else {
       thisLocal = null;
     }
-    member.function.body.accept(this);
+    member.function!.body!.accept(this);
     b.end();
   }
 
@@ -135,7 +135,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitSuperInitializer(SuperInitializer node) {
-    if ((node.parent as Constructor).enclosingClass.superclass?.superclass ==
+    if ((node.parent as Constructor).enclosingClass!.superclass?.superclass ==
         null) {
       return;
     }
@@ -143,8 +143,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (translator.optionParameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
-    _visitArguments(node.arguments, node.target.function);
-    _call(node.target!);
+    _visitArguments(node.arguments, node.target.function!);
+    _call(node.target);
   }
 
   void visitBlock(Block node) {
@@ -183,8 +183,12 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     return condition is LogicalExpression;
   }
 
-  void _branchIf(Expression condition, w.Label target,
+  void _branchIf(Expression? condition, w.Label target,
       {required bool negated}) {
+    if (condition == null) {
+      b.br(target);
+      return;
+    }
     while (condition is Not) {
       negated = !negated;
       condition = condition.operand;
@@ -202,7 +206,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
         _branchIf(condition.right, target, negated: negated);
       }
     } else {
-      condition.accept(this);
+      condition!.accept(this);
       if (negated) {
         b.i32_eqz();
       }
@@ -307,7 +311,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (translator.optionParameterNullability) {
       b.ref_as_non_null();
     }
-    _visitArguments(node.arguments, node.target.function);
+    _visitArguments(node.arguments, node.target.function!);
     _call(node.target);
     b.local_get(temp);
   }
@@ -318,7 +322,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       intrinsic(this);
       return;
     }
-    _visitArguments(node.arguments, node.target.function);
+    _visitArguments(node.arguments, node.target.function!);
     if (node.target == translator.coreTypes.identicalProcedure) {
       // TODO: Check for reference types
       b.ref_eq();
@@ -332,8 +336,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (translator.optionParameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
-    _visitArguments(node.arguments, node.interfaceTarget.function);
-    _call(node.interfaceTarget);
+    _visitArguments(node.arguments, node.interfaceTarget!.function!);
+    _call(node.interfaceTarget!);
   }
 
   void visitInstanceInvocation(InstanceInvocation node) {
@@ -343,7 +347,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       throw "Unsupported invocation of $target";
     }
     if (target.kind == ProcedureKind.Operator) {
-      _visitArguments(node.arguments, node.interfaceTarget.function);
+      _visitArguments(node.arguments, node.interfaceTarget.function!);
       Intrinsic? intrinsic =
           translator.intrinsics.getOperatorIntrinsic(node, this);
       if (intrinsic != null) {
@@ -389,7 +393,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     Member? singleTarget = translator.subtypes
         .getSingleTargetForInterfaceInvocation(interfaceTarget, setter: setter);
     if (singleTarget != null) {
-      _visitArguments(arguments, singleTarget.function);
+      _visitArguments(arguments, singleTarget.function!);
       _call(singleTarget);
       return;
     }
@@ -404,7 +408,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     w.Local receiver =
         function.addLocal(w.RefType.def(object.struct, nullable: true));
     b.local_tee(receiver);
-    _visitArguments(arguments, interfaceTarget.function);
+    _visitArguments(arguments, interfaceTarget.function!);
 
     if (translator.optionPolymorphicSpecialization) {
       return _polymorphicSpecialization(selector, receiver);
@@ -504,7 +508,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       b.struct_get(struct, fieldIndex);
       return;
     } else if (target is Procedure && target.isGetter) {
-      node.receiver.accept(this);
+      _visitArgument(node.receiver, node.receiver.getStaticType(typeContext));
       _virtualCall(target, Arguments([]), getter: true, setter: false);
       return;
     }
@@ -541,8 +545,9 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitConditionalExpression(ConditionalExpression node) {
-    w.ValueType type =
-        translator.translateType(node.getStaticType(typeContext));
+    w.ValueType type = translator
+        .translateType(node.getStaticType(typeContext))
+        .withNullability(true);
     _conditional(node.condition, node.then, node.otherwise, [type]);
   }
 
@@ -596,7 +601,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitNullLiteral(NullLiteral node) {
-    TreeNode parent = node.parent;
+    TreeNode parent = node.parent!;
     DartType type;
     if (parent is VariableDeclaration) {
       type = parent.type;
@@ -606,7 +611,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       Member target = parent.interfaceTarget;
       type = target is Field
           ? target.type
-          : target.function.positionalParameters.single.type;
+          : target.function!.positionalParameters.single.type;
     } else if (parent is Field) {
       type = parent.type;
     } else if (parent is FieldInitializer) {

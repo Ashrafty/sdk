@@ -139,9 +139,9 @@ main(List<String> args) async {
   Procedure printMember = component.libraries
       .firstWhere((l) => l.name == "dart.core")
       .procedures
-      .firstWhere((p) => p.name.name == "print");
+      .firstWhere((p) => p.name?.name == "print");
   printMember.isExternal = true;
-  printMember.function.body = null;
+  printMember.function!.body = null;
 
   if (false)
     await runGlobalTransformations(

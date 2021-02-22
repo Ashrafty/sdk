@@ -71,7 +71,7 @@ class Translator {
     for (Procedure printMember in component.libraries
         .firstWhere((l) => l.name == "dart.core")
         .procedures
-        .where((p) => p.name.name == "print")) {
+        .where((p) => p.name?.name == "print")) {
       functions[printMember] = printFun;
     }
 
@@ -94,7 +94,7 @@ class Translator {
         }
         if (optionPrintKernel) {
           if (member is Constructor) {
-            Class cls = member.enclosingClass;
+            Class cls = member.enclosingClass!;
             for (Field field in cls.fields) {
               if (field.isInstanceMember && field.initializer != null) {
                 print("${field.name}: ${field.initializer}");
@@ -104,7 +104,7 @@ class Translator {
               print(initializer);
             }
           }
-          print(member.function.body);
+          print(member.function!.body);
           if (!optionPrintWasm) print("");
         }
         m.exportFunction(member.toString(), function);
@@ -166,7 +166,7 @@ class Translator {
 
   bool shouldInline(Member target) {
     if (!optionInlning) return false;
-    Statement? body = target.function.body;
+    Statement? body = target.function!.body;
     return body != null && NodeCounter().countNodes(body) < 5;
   }
 }

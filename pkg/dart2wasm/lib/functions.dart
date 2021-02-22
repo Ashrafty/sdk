@@ -40,7 +40,7 @@ class FunctionCollector extends MemberVisitor<void> {
         translator.functions[node] =
             m.addFunction(translator.dispatchTable.signatureForTarget(node));
       } else {
-        _makeFunction(node, node.function.returnType, null);
+        _makeFunction(node, node.function!.returnType, null);
       }
     }
   }
@@ -54,7 +54,7 @@ class FunctionCollector extends MemberVisitor<void> {
       Member member, DartType returnType, DartType? receiverType) {
     if (translator.functions.containsKey(member)) return;
 
-    FunctionNode function = member.function;
+    FunctionNode function = member.function!;
     if (function.namedParameters.isNotEmpty ||
         function.requiredParameterCount <
             function.positionalParameters.length) {
