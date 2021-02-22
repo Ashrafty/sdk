@@ -91,6 +91,8 @@ class ClassInfoCollector {
       }
       translator.classes.add(info);
       translator.classInfo[cls] = info;
+      translator.classForHeapType
+          .putIfAbsent(w.HeapType.def(info.struct), () => info!);
     }
   }
 

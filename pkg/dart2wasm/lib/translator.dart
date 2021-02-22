@@ -2,7 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:dart2wasm/analyzer.dart';
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
 import 'package:dart2wasm/dispatch_table.dart';
@@ -34,15 +33,16 @@ class Translator {
   ClosedWorldClassHierarchy hierarchy;
   late ClassHierarchySubtypes subtypes;
 
-  late Intrinsics intrinsics;
   late DispatchTable dispatchTable;
 
   List<ClassInfo> classes = [];
   Map<Class, ClassInfo> classInfo = {};
+  Map<w.HeapType, ClassInfo> classForHeapType = {};
   Map<Field, int> fieldIndex = {};
   Map<Member, w.BaseFunction> functions = {};
   late Procedure mainFunction;
   late w.Module m;
+  late w.ValueType voidMarker;
 
   Map<DartType, w.ArrayType> arrayTypeCache = {};
 
@@ -57,12 +57,12 @@ class Translator {
         hierarchy =
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
     subtypes = hierarchy.computeSubtypesInformation();
-    intrinsics = Intrinsics(this);
     dispatchTable = DispatchTable(this);
   }
 
   w.Module translate() {
     m = w.Module();
+    voidMarker = w.RefType.def(w.StructType("void"), nullable: true);
 
     ClassInfoCollector(this).collect();
 
@@ -84,7 +84,6 @@ class Translator {
     //w.DefinedFunction mainFun = functions[mainFunction] as w.DefinedFunction;
     //m.exportFunction("main", mainFun);
 
-    Analyzer(this).visitComponent(component);
     var codeGen = CodeGenerator(this);
     for (Member member in functions.keys) {
       w.BaseFunction function = functions[member]!;
@@ -143,6 +142,9 @@ class Translator {
     }
     if (type is DynamicType) {
       return translateType(coreTypes.objectNullableRawType);
+    }
+    if (type is VoidType) {
+      return voidMarker;
     }
     if (type is TypeParameterType) {
       return translateType(type.bound);

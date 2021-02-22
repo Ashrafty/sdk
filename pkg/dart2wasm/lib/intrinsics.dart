@@ -2,32 +2,42 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:dart2wasm/translator.dart';
-import 'package:dart2wasm/code_generator.dart';
 import 'package:kernel/ast.dart';
+
+import 'package:dart2wasm/body_analyzer.dart';
+import 'package:dart2wasm/code_generator.dart';
+import 'package:dart2wasm/translator.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
-typedef Intrinsic = void Function(CodeGenerator codeGen);
-
-class Intrinsics {
-  final Translator translator;
+class Intrinsifier {
+  final BodyAnalyzer bodyAnalyzer;
   final DartType intType;
   final DartType doubleType;
 
-  late final Map<DartType, Map<String, Map<DartType, Intrinsic>>>
+  late final Map<DartType, Map<String, Map<DartType, CodeGenCallback>>>
       binaryOperatorMap;
-  late final Map<DartType, Map<String, Intrinsic>> unaryOperatorMap;
-  late final Map<DartType, Map<DartType, Map<bool, Intrinsic>>> equalsMap;
+  late final Map<DartType, Map<String, CodeGenCallback>> unaryOperatorMap;
+  late final Map<DartType, Map<DartType, Map<bool, CodeGenCallback>>> equalsMap;
 
   // Meaning of the `isNot` field of `EqualsCall`
   static const bool isEquals = false;
   static const bool isNotEquals = true;
 
-  Intrinsics(this.translator)
-      : intType = translator.coreTypes.intRawType(Nullability.nonNullable),
-        doubleType =
-            translator.coreTypes.doubleRawType(Nullability.nonNullable) {
+  Translator get translator => bodyAnalyzer.translator;
+
+  DartType dartTypeOf(Expression exp) {
+    return exp.getStaticType(bodyAnalyzer.codeGen.typeContext);
+  }
+
+  static bool isComparison(String op) =>
+      op == '<' || op == '<=' || op == '>' || op == '>=';
+
+  Intrinsifier(this.bodyAnalyzer)
+      : intType = bodyAnalyzer.translator.coreTypes
+            .intRawType(Nullability.nonNullable),
+        doubleType = bodyAnalyzer.translator.coreTypes
+            .doubleRawType(Nullability.nonNullable) {
     binaryOperatorMap = {
       intType: {
         '+': {intType: (c) => c.b.i64_add()},
@@ -91,65 +101,150 @@ class Intrinsics {
     };
   }
 
-  Intrinsic? getOperatorIntrinsic(
-      InstanceInvocation invocation, CodeGenerator codeGen) {
-    DartType receiverType =
-        invocation.receiver.getStaticType(codeGen.typeContext);
+  w.ValueType? getOperatorIntrinsic(InstanceInvocation invocation) {
+    DartType receiverType = dartTypeOf(invocation.receiver);
     String name = invocation.name.name;
     if (invocation.interfaceTarget.enclosingClass ==
-        codeGen.translator.coreTypes.listClass) {
+        translator.coreTypes.listClass) {
       DartType elementType =
           (receiverType as InterfaceType).typeArguments.single;
-      w.ArrayType arrayType = codeGen.translator.arrayType(elementType);
+      w.ArrayType arrayType = translator.arrayType(elementType);
       switch (name) {
         case '[]':
-          return (c) {
+          Expression array = invocation.receiver;
+          Expression index = invocation.arguments.positional.single;
+          bodyAnalyzer.wrapExpression(
+              array, w.RefType.def(arrayType, nullable: true));
+          bodyAnalyzer.wrapExpression(index, w.NumType.i64);
+          bodyAnalyzer.inject[invocation] = (c) {
+            c.wrap(array);
+            c.wrap(index);
             c.b.i32_wrap_i64();
             c.b.array_get(arrayType);
           };
+          return bodyAnalyzer.translateType(elementType);
         case '[]=':
-          return (c) {
-            w.Local temp =
-                c.function.addLocal(c.translator.translateType(elementType));
-            c.b.local_set(temp);
+          Expression array = invocation.receiver;
+          Expression index = invocation.arguments.positional[0];
+          Expression value = invocation.arguments.positional[1];
+          bodyAnalyzer.wrapExpression(
+              array, w.RefType.def(arrayType, nullable: true));
+          bodyAnalyzer.wrapExpression(index, w.NumType.i64);
+          bodyAnalyzer.wrapExpression(
+              value, bodyAnalyzer.translateType(elementType));
+          bodyAnalyzer.inject[invocation] = (c) {
+            c.wrap(array);
+            c.wrap(index);
             c.b.i32_wrap_i64();
-            c.b.local_get(temp);
+            c.wrap(value);
             c.b.array_set(arrayType);
           };
+          return bodyAnalyzer.voidMarker;
         default:
           throw "Unsupported list operator: $name";
       }
     }
+
     if (invocation.arguments.positional.length == 1) {
       // Binary operator
-      DartType argType =
-          invocation.arguments.positional[0].getStaticType(codeGen.typeContext);
-      return binaryOperatorMap[receiverType]?[name]?[argType];
+      Expression left = invocation.receiver;
+      Expression right = invocation.arguments.positional.single;
+      DartType argType = dartTypeOf(right);
+      var op = binaryOperatorMap[receiverType]?[name]?[argType];
+      if (op != null) {
+        // TODO: Support differing operand types
+        w.ValueType inType = translator.translateType(receiverType);
+        w.ValueType outType = isComparison(name) ? w.NumType.i32 : inType;
+        bodyAnalyzer.wrapExpression(left, inType);
+        bodyAnalyzer.wrapExpression(right, inType);
+        bodyAnalyzer.inject[invocation] = (c) {
+          c.wrap(left);
+          c.wrap(right);
+          op(c);
+        };
+        return outType;
+      }
     } else {
-      assert(invocation.arguments.positional.length == 0);
       // Unary operator
-      return unaryOperatorMap[receiverType]?[name];
+      assert(invocation.arguments.positional.length == 0);
+      Expression operand = invocation.receiver;
+      var op = unaryOperatorMap[receiverType]?[name];
+      if (op != null) {
+        w.ValueType wasmType = translator.translateType(receiverType);
+        bodyAnalyzer.wrapExpression(operand, wasmType);
+        bodyAnalyzer.inject[invocation] = (c) {
+          c.wrap(invocation.receiver);
+          op(c);
+        };
+        return wasmType;
+      }
     }
   }
 
-  Intrinsic? getEqualsIntrinsic(EqualsCall node, CodeGenerator codeGen) {
-    DartType leftType = node.left.getStaticType(codeGen.typeContext);
-    DartType rightType = node.right.getStaticType(codeGen.typeContext);
-    return equalsMap[leftType]?[rightType]?[node.isNot];
+  w.ValueType? getEqualsIntrinsic(EqualsCall node) {
+    DartType leftType = dartTypeOf(node.left);
+    DartType rightType = dartTypeOf(node.right);
+    if (leftType == intType && rightType == intType) {
+      bodyAnalyzer.wrapExpression(node.left, w.NumType.i64);
+      bodyAnalyzer.wrapExpression(node.right, w.NumType.i64);
+      bodyAnalyzer.inject[node] = (c) {
+        c.wrap(node.left);
+        c.wrap(node.right);
+        if (node.isNot) {
+          c.b.i64_ne();
+        } else {
+          c.b.i64_eq();
+        }
+      };
+      return w.NumType.i32;
+    }
+
+    if (leftType == doubleType && rightType == doubleType) {
+      bodyAnalyzer.wrapExpression(node.left, w.NumType.f64);
+      bodyAnalyzer.wrapExpression(node.right, w.NumType.f64);
+      bodyAnalyzer.inject[node] = (c) {
+        c.wrap(node.left);
+        c.wrap(node.right);
+        if (node.isNot) {
+          c.b.f64_ne();
+        } else {
+          c.b.f64_eq();
+        }
+      };
+      return w.NumType.i32;
+    }
   }
 
-  Intrinsic? getStaticIntrinsic(StaticInvocation node, CodeGenerator codeGen) {
-    if (node.target.enclosingClass == codeGen.translator.coreTypes.listClass &&
+  w.ValueType? getStaticIntrinsic(StaticInvocation node) {
+    if (node.target.enclosingLibrary == translator.coreTypes.coreLibrary &&
+        node.name.name == "identical") {
+      Expression first = node.arguments.positional[0];
+      Expression second = node.arguments.positional[1];
+      // TODO: Support non-reference types
+      w.ValueType object = bodyAnalyzer.codeGen.object.repr;
+      bodyAnalyzer.wrapExpression(first, object);
+      bodyAnalyzer.wrapExpression(second, object);
+      bodyAnalyzer.inject[node] = (c) {
+        c.wrap(first);
+        c.wrap(second);
+        c.b.ref_eq();
+      };
+      return w.NumType.i32;
+    }
+
+    if (node.target.enclosingClass == translator.coreTypes.listClass &&
         node.name.name == "filled") {
-      return (c) {
+      Expression length = node.arguments.positional[0];
+      w.ArrayType arrayType = translator.arrayType(node.arguments.types.single);
+      bodyAnalyzer.wrapExpression(length, w.NumType.i64);
+      bodyAnalyzer.inject[node] = (c) {
         // TODO: Support filling with other than default value
-        w.ArrayType arrayType =
-            c.translator.arrayType(node.arguments.types.single);
-        node.arguments.positional.first.accept(c);
+        c.wrap(node.arguments.positional.first);
         c.b.i32_wrap_i64();
         c.b.rtt_canon(arrayType);
         c.b.array_new_default_with_rtt(arrayType);
       };
+      return w.RefType.def(arrayType, nullable: false);
     }
   }
 }
