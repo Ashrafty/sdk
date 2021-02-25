@@ -221,7 +221,9 @@ class Intrinsifier {
       Expression first = node.arguments.positional[0];
       Expression second = node.arguments.positional[1];
       // TODO: Support non-reference types
-      w.ValueType object = bodyAnalyzer.codeGen.object.repr;
+      w.ValueType object = w.RefType.def(
+          bodyAnalyzer.codeGen.object.repr.struct,
+          nullable: true);
       bodyAnalyzer.wrapExpression(first, object);
       bodyAnalyzer.wrapExpression(second, object);
       bodyAnalyzer.inject[node] = (c) {

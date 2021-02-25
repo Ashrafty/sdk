@@ -8,11 +8,6 @@ import 'package:kernel/ast.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
-//class SelectorInfo {
-//  int offset;
-//  w.FunctionType signature;
-//}
-
 class FunctionCollector extends MemberVisitor<void> {
   Translator translator;
   w.Module m;
@@ -34,45 +29,71 @@ class FunctionCollector extends MemberVisitor<void> {
 
   void defaultMember(Member node) {}
 
+  void visitField(Field node) {
+    if (node.isInstanceMember) {
+      translator.functions[node.getterReference] = m.addFunction(translator
+          .dispatchTable
+          .selectorForTarget(node.getterReference)
+          .signature);
+      if (node.hasSetter) {
+        translator.functions[node.setterReference!] = m.addFunction(translator
+            .dispatchTable
+            .selectorForTarget(node.setterReference!)
+            .signature);
+      }
+    }
+  }
+
   void visitProcedure(Procedure node) {
     if (!node.isAbstract) {
       if (node.isInstanceMember) {
-        translator.functions[node] =
-            m.addFunction(translator.dispatchTable.signatureForTarget(node));
+        translator.functions[node.reference] = m.addFunction(translator
+            .dispatchTable
+            .selectorForTarget(node.reference)
+            .signature);
       } else {
-        _makeFunction(node, node.function!.returnType, null);
+        _makeFunction(node.reference, node.function!.returnType, null,
+            getter: node.isGetter);
       }
     }
   }
 
   void visitConstructor(Constructor node) {
-    _makeFunction(node, VoidType(),
-        InterfaceType(node.enclosingClass!, Nullability.nonNullable));
+    _makeFunction(node.reference, VoidType(),
+        InterfaceType(node.enclosingClass!, Nullability.nonNullable),
+        getter: false);
   }
 
   void _makeFunction(
-      Member member, DartType returnType, DartType? receiverType) {
-    if (translator.functions.containsKey(member)) return;
+      Reference target, DartType returnType, DartType? receiverType,
+      {required bool getter}) {
+    if (translator.functions.containsKey(target)) return;
 
-    FunctionNode function = member.function!;
-    if (function.namedParameters.isNotEmpty ||
-        function.requiredParameterCount <
-            function.positionalParameters.length) {
-      throw "Optional parameters not supported";
+    Member member = target.asMember;
+    Iterable<DartType> params;
+    if (member is Field) {
+      params = [if (target.isImplicitSetter) member.setterType];
+    } else {
+      FunctionNode function = member.function!;
+      if (function.namedParameters.isNotEmpty ||
+          function.requiredParameterCount <
+              function.positionalParameters.length) {
+        throw "Optional parameters not supported";
+      }
+      params = function.positionalParameters.map((p) => p.type);
     }
 
     List<w.ValueType> inputs = [];
     if (receiverType != null) {
       inputs.add(translator.translateType(receiverType));
     }
-    inputs.addAll(function.positionalParameters
-        .map((p) => translator.translateType(p.type)));
+    inputs.addAll(params.map((t) => translator.translateType(t)));
 
     List<w.ValueType> outputs = returnType is VoidType
         ? const []
         : [translator.translateType(returnType)];
 
     w.FunctionType functionType = m.addFunctionType(inputs, outputs);
-    translator.functions[member] = m.addFunction(functionType);
+    translator.functions[target] = m.addFunction(functionType);
   }
 }

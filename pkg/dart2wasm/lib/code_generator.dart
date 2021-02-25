@@ -2,9 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async';
-import 'dart:math';
-
 import 'package:kernel/ast.dart';
 import 'package:kernel/type_environment.dart';
 import 'package:kernel/visitor.dart';
@@ -20,12 +17,14 @@ typedef CodeGenCallback = void Function(CodeGenerator codeGen);
 
 class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   Translator translator;
+  w.ValueType voidMarker;
 
   late Member member;
   late w.DefinedFunction function;
   late StaticTypeContext typeContext;
   late List<w.Local> paramLocals;
   w.Label? returnLabel;
+  late w.ValueType returnType;
 
   late BodyAnalyzer bodyAnalyzer;
 
@@ -33,7 +32,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   w.Local? thisLocal;
   late w.Instructions b;
 
-  CodeGenerator(this.translator);
+  CodeGenerator(this.translator) : voidMarker = translator.voidMarker;
 
   ClassInfo get object => translator.classes[0];
 
@@ -45,8 +44,9 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     throw "Not supported: ${node.runtimeType}";
   }
 
-  void generate(Member member, w.DefinedFunction function,
+  void generate(Reference reference, w.DefinedFunction function,
       {List<w.Local>? inlinedLocals, w.Label? returnLabel}) {
+    Member member = reference.asMember;
     if (member.isExternal) {
       print("External member: $member");
       return;
@@ -57,6 +57,43 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     typeContext = StaticTypeContext(member, translator.typeEnvironment);
     paramLocals = inlinedLocals ?? function.locals;
     this.returnLabel = returnLabel;
+    returnType =
+        outputOrVoid(returnLabel?.targetTypes ?? function.type.outputs);
+    b = function.body;
+
+    if (member is Field) {
+      // Implicit getter or setter
+      w.StructType struct =
+          translator.classInfo[member.enclosingClass!]!.struct;
+      int index = translator.fieldIndex[member]!;
+      w.ValueType fieldType = struct.fields[index].type.unpacked;
+
+      void getThis() {
+        w.Local thisLocal = paramLocals[0];
+        w.RefType structType = w.RefType.def(struct, nullable: true);
+        convertType(thisLocal.type, structType, (c) {
+          c.b.local_get(thisLocal);
+        });
+      }
+
+      if (reference.isImplicitGetter) {
+        // Implicit getter
+        convertType(fieldType, returnType, (c) {
+          getThis();
+          c.b.struct_get(struct, index);
+        });
+      } else {
+        // Implicit setter
+        w.Local valueLocal = paramLocals[1];
+        getThis();
+        convertType(valueLocal.type, fieldType, (c) {
+          c.b.local_get(valueLocal);
+        });
+        b.struct_set(struct, index);
+      }
+      b.end();
+      return;
+    }
 
     bodyAnalyzer = BodyAnalyzer(this);
     bodyAnalyzer.analyzeMember(member);
@@ -70,7 +107,6 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       locals[params[i]] = paramLocals[implicitParams + i];
     }
 
-    b = function.body;
     if (member is Constructor) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       thisLocal = paramLocals[0];
@@ -87,7 +123,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     } else if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       if (bodyAnalyzer.specializeThis) {
-        thisLocal = function.addLocal(info.repr);
+        thisLocal =
+            function.addLocal(w.RefType.def(info.repr.struct, nullable: true));
         b.local_get(paramLocals[0]);
         b.global_get(info.rtt);
         b.ref_cast();
@@ -102,6 +139,88 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.end();
   }
 
+  void convertType(w.ValueType from, w.ValueType to, CodeGenCallback sub) {
+    CodeGenCallback? callback = convertTypeCallback(from, to, sub);
+    if (callback != null) {
+      callback(this);
+    } else {
+      sub(this);
+    }
+  }
+
+  w.ValueType outputOrVoid(List<w.ValueType> outputs) {
+    return outputs.isEmpty ? voidMarker : outputs.single;
+  }
+
+  CodeGenCallback? convertTypeCallback(
+      w.ValueType from, w.ValueType to, CodeGenCallback sub) {
+    if (from == voidMarker || to == voidMarker) {
+      if (from != voidMarker) {
+        return (c) {
+          sub(c);
+          c.b.drop();
+        };
+      }
+      if (to != voidMarker) {
+        // This can happen when a void method has its return type overridden to
+        // return a value, in which case the selector signature will have a
+        // non-void return type to encompass all possible return values.
+        w.RefType toRef = to as w.RefType;
+        assert(toRef.nullable);
+        return (c) {
+          sub(c);
+          c.b.ref_null(toRef.heapType);
+        };
+      }
+    }
+    if (!from.isSubtypeOf(to)) {
+      if (from is! w.RefType && to is w.RefType) {
+        // Boxing
+        ClassInfo info = translator.classForPrimitive[from]!;
+        assert(w.HeapType.def(info.struct).isSubtypeOf(to.heapType));
+        return (c) {
+          c.b.i32_const(info.classId);
+          sub(c);
+          c.b.global_get(info.rtt);
+          c.b.struct_new_with_rtt(info.struct);
+        };
+      } else if (from is w.RefType && to is! w.RefType) {
+        // Unboxing
+        ClassInfo info = translator.classForPrimitive[to]!;
+        bool needsCast =
+            !from.heapType.isSubtypeOf(w.HeapType.def(info.struct));
+        return (c) {
+          sub(c);
+          if (needsCast) {
+            c.b.global_get(info.rtt);
+            c.b.ref_cast();
+          }
+          c.b.struct_get(info.struct, 1);
+        };
+      } else if (from.withNullability(false).isSubtypeOf(to)) {
+        // Null check
+        return (c) {
+          sub(c);
+          c.b.ref_as_non_null();
+        };
+      } else {
+        // Downcast
+        var heapType = (to as w.RefType).heapType;
+        w.Global global = translator.classForHeapType[heapType]!.rtt;
+        bool needsNullCheck = from.nullable && !to.nullable;
+        return (c) {
+          sub(c);
+          if (needsNullCheck) {
+            c.b.ref_as_non_null();
+          }
+          c.b.global_get(global);
+          c.b.ref_cast();
+        };
+      }
+    }
+    return null;
+  }
+
   void wrap(TreeNode node) {
     CodeGenCallback? injection = bodyAnalyzer.inject[node];
     if (injection != null) {
@@ -111,7 +230,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
-  void _call(Member target) {
+  void _call(Reference target) {
+    assert(target is! Field);
     w.BaseFunction targetFunction = translator.functions[target]!;
     if (translator.shouldInline(target)) {
       List<w.Local> inlinedLocals = targetFunction.type.inputs
@@ -144,8 +264,11 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       return;
     }
     b.local_get(thisLocal!);
+    if (translator.optionParameterNullability && thisLocal!.type.nullable) {
+      b.ref_as_non_null();
+    }
     _visitArguments(node.arguments);
-    _call(node.target);
+    _call(node.target.reference);
   }
 
   void visitBlock(Block node) {
@@ -278,6 +401,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     Expression? expression = node.expression;
     if (expression != null) {
       wrap(expression);
+    } else {
+      convertType(voidMarker, returnType, (c) {});
     }
     if (returnLabel != null) {
       b.br(returnLabel!);
@@ -297,7 +422,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitConstructorInvocation(ConstructorInvocation node) {
     ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
-    w.Local temp = function.addLocal(info.repr);
+    w.Local temp =
+        function.addLocal(w.RefType.def(info.repr.struct, nullable: true));
     b.global_get(info.rtt);
     b.struct_new_default_with_rtt(info.struct);
     b.local_tee(temp);
@@ -305,7 +431,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.i32_const(info.classId);
     b.struct_set(info.struct, 0);
     _visitArguments(node.arguments);
-    _call(node.target);
+    _call(node.target.reference);
     if (bodyAnalyzer.preserved.contains(node)) {
       b.local_get(temp);
     }
@@ -313,7 +439,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitStaticInvocation(StaticInvocation node) {
     _visitArguments(node.arguments);
-    _call(node.target);
+    _call(node.target.reference);
   }
 
   void visitSuperMethodInvocation(SuperMethodInvocation node) {
@@ -322,13 +448,23 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       b.ref_as_non_null();
     }
     _visitArguments(node.arguments);
-    _call(node.interfaceTarget!);
+    _call(node.interfaceTarget!.reference);
   }
 
   void visitInstanceInvocation(InstanceInvocation node) {
     Procedure target = node.interfaceTarget;
     wrap(node.receiver);
-    _virtualCall(target, node.arguments, getter: false, setter: false);
+    Member? singleTarget = translator.singleTarget(
+        node.interfaceTarget, node.receiver.getStaticType(typeContext),
+        setter: false);
+    if (singleTarget != null) {
+      _visitArguments(node.arguments);
+      _call(singleTarget.reference);
+      return;
+    }
+    _virtualCall(target, () {
+      _visitArguments(node.arguments);
+    }, getter: false, setter: false);
   }
 
   void visitEqualsCall(EqualsCall node) {
@@ -349,16 +485,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
-  void _virtualCall(Procedure interfaceTarget, Arguments arguments,
+  void _virtualCall(Member interfaceTarget, void pushArguments(),
       {required bool getter, required bool setter}) {
-    Member? singleTarget = translator.subtypes
-        .getSingleTargetForInterfaceInvocation(interfaceTarget, setter: setter);
-    if (singleTarget != null) {
-      _visitArguments(arguments);
-      _call(singleTarget);
-      return;
-    }
-
     int selectorId = getter
         ? translator.tableSelectorAssigner.getterSelectorId(interfaceTarget)
         : translator.tableSelectorAssigner
@@ -369,7 +497,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     w.Local receiver =
         function.addLocal(w.RefType.def(object.struct, nullable: true));
     b.local_tee(receiver);
-    _visitArguments(arguments);
+    pushArguments();
 
     if (translator.optionPolymorphicSpecialization) {
       return _polymorphicSpecialization(selector, receiver);
@@ -383,8 +511,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void _polymorphicSpecialization(SelectorInfo selector, w.Local receiver) {
-    Map<int, Procedure> implementations = Map.from(selector.classes);
-    implementations.removeWhere((id, target) => target.isAbstract);
+    Map<int, Reference> implementations = Map.from(selector.classes);
+    implementations.removeWhere((id, target) => target.asMember.isAbstract);
 
     w.Local idVar = function.addLocal(w.NumType.i32);
     b.local_get(receiver);
@@ -396,7 +524,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     calls:
     while (Set.from(implementations.values).length > 1) {
       for (int id in implementations.keys) {
-        Procedure target = implementations[id]!;
+        Reference target = implementations[id]!;
         if (implementations.values.where((t) => t == target).length == 1) {
           // Single class id implements method.
           b.local_get(idVar);
@@ -418,7 +546,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       assert(sorted.lastWhere(
               (id) => implementations[id] != implementations[pivotId]) ==
           pivotId - 1);
-      Procedure target = implementations[sorted.first]!;
+      Reference target = implementations[sorted.first]!;
       b.local_get(idVar);
       b.i32_const(pivotId);
       b.i32_lt_u();
@@ -433,7 +561,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       continue calls;
     }
     // Call remaining implementation.
-    Procedure target = implementations.values.first;
+    Reference target = implementations.values.first;
     _call(target);
     b.end();
   }
@@ -463,41 +591,54 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   @override
   void visitInstanceGet(InstanceGet node) {
-    Member target = node.interfaceTarget;
-    if (target is Field) {
-      wrap(node.receiver);
-      w.StructType struct = translator.classInfo[target.enclosingClass]!.struct;
-      int fieldIndex = translator.fieldIndex[target]!;
-      b.struct_get(struct, fieldIndex);
-      return;
-    } else if (target is Procedure && target.isGetter) {
-      wrap(node.receiver);
-      _virtualCall(target, Arguments([]), getter: true, setter: false);
-      return;
+    wrap(node.receiver);
+    Member? singleTarget = translator.singleTarget(
+        node.interfaceTarget, node.receiver.getStaticType(typeContext),
+        setter: false);
+    if (singleTarget != null) {
+      if (singleTarget is Field) {
+        w.StructType struct =
+            translator.classInfo[singleTarget.enclosingClass]!.struct;
+        int fieldIndex = translator.fieldIndex[singleTarget]!;
+        b.struct_get(struct, fieldIndex);
+      } else {
+        assert(singleTarget is Procedure && singleTarget.isGetter);
+        _call(singleTarget.reference);
+      }
+    } else {
+      _virtualCall(node.interfaceTarget, () {}, getter: true, setter: false);
     }
-    throw "InstanceGet of non-Field/Getter $target not supported";
   }
 
   @override
   void visitInstanceSet(InstanceSet node) {
-    Member target = node.interfaceTarget;
-    if (target is Field) {
-      wrap(node.receiver);
-      w.StructType struct = translator.classInfo[target.enclosingClass]!.struct;
-      int fieldIndex = translator.fieldIndex[target]!;
+    wrap(node.receiver);
+    bool preserved = bodyAnalyzer.preserved.contains(node);
+    w.Local? temp = preserved
+        ? function.addLocal(
+            translator.translateType(node.value.getStaticType(typeContext)))
+        : null;
+    Member? singleTarget = translator.singleTarget(
+        node.interfaceTarget, node.receiver.getStaticType(typeContext),
+        setter: true);
+    if (singleTarget != null) {
       wrap(node.value);
-      if (bodyAnalyzer.preserved.contains(node)) {
-        w.Local temp =
-            function.addLocal(struct.fields[fieldIndex].type.unpacked);
-        b.local_tee(temp);
+      if (preserved) b.local_tee(temp!);
+      if (singleTarget is Field) {
+        w.StructType struct =
+            translator.classInfo[singleTarget.enclosingClass]!.struct;
+        int fieldIndex = translator.fieldIndex[singleTarget]!;
         b.struct_set(struct, fieldIndex);
-        b.local_get(temp);
       } else {
-        b.struct_set(struct, fieldIndex);
+        _call(singleTarget.reference);
       }
-      return;
+    } else {
+      _virtualCall(node.interfaceTarget, () {
+        wrap(node.value);
+        if (preserved) b.local_tee(temp!);
+      }, getter: false, setter: true);
     }
-    throw "InstanceSet of non-Field $target not supported";
+    if (preserved) b.local_get(temp!);
   }
 
   void visitLogicalExpression(LogicalExpression node) {
@@ -559,17 +700,20 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     // TODO: Check
   }
 
-  void visitNullLiteral(NullLiteral node) {
+  void _emitNull(Node node) {
     w.ValueType wasmType = bodyAnalyzer.expressionType[node]!;
-    w.HeapType heapType =
-        wasmType is w.RefType ? wasmType.heapType : w.HeapType.any;
-    b.ref_null(heapType);
+    if (wasmType != voidMarker) {
+      w.HeapType heapType =
+          wasmType is w.RefType ? wasmType.heapType : w.HeapType.any;
+      b.ref_null(heapType);
+    }
+  }
+
+  void visitNullLiteral(NullLiteral node) {
+    _emitNull(node);
   }
 
   void visitNullConstant(NullConstant node) {
-    w.ValueType wasmType = bodyAnalyzer.expressionType[node]!;
-    w.HeapType heapType =
-        wasmType is w.RefType ? wasmType.heapType : w.HeapType.any;
-    b.ref_null(heapType);
+    _emitNull(node);
   }
 }

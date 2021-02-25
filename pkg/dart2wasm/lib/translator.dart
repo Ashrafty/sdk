@@ -6,7 +6,6 @@ import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
 import 'package:dart2wasm/dispatch_table.dart';
 import 'package:dart2wasm/functions.dart';
-import 'package:dart2wasm/intrinsics.dart';
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart'
@@ -38,8 +37,9 @@ class Translator {
   List<ClassInfo> classes = [];
   Map<Class, ClassInfo> classInfo = {};
   Map<w.HeapType, ClassInfo> classForHeapType = {};
+  Map<w.NumType, ClassInfo> classForPrimitive = {};
   Map<Field, int> fieldIndex = {};
-  Map<Member, w.BaseFunction> functions = {};
+  Map<Reference, w.BaseFunction> functions = {};
   late Procedure mainFunction;
   late w.Module m;
   late w.ValueType voidMarker;
@@ -72,7 +72,7 @@ class Translator {
         .firstWhere((l) => l.name == "dart.core")
         .procedures
         .where((p) => p.name?.name == "print")) {
-      functions[printMember] = printFun;
+      functions[printMember.reference] = printFun;
     }
 
     dispatchTable.build();
@@ -85,11 +85,13 @@ class Translator {
     //m.exportFunction("main", mainFun);
 
     var codeGen = CodeGenerator(this);
-    for (Member member in functions.keys) {
-      w.BaseFunction function = functions[member]!;
+    for (Reference reference in functions.keys) {
+      Member member = reference.asMember;
+      w.BaseFunction function = functions[reference]!;
       if (function is w.DefinedFunction) {
+        String exportName = reference.isSetter ? "$member=" : "$member";
         if (optionPrintKernel || optionPrintWasm) {
-          print("#${function.index}: $member");
+          print("#${function.index}: $exportName");
         }
         if (optionPrintKernel) {
           if (member is Constructor) {
@@ -103,16 +105,33 @@ class Translator {
               print(initializer);
             }
           }
-          print(member.function!.body);
+          Statement? body = member.function?.body;
+          if (body != null) {
+            print(body);
+          }
           if (!optionPrintWasm) print("");
         }
-        m.exportFunction(member.toString(), function);
-        codeGen.generate(member, function);
+        m.exportFunction(exportName, function);
+        codeGen.generate(reference, function);
         if (optionPrintWasm) print(function.body.trace);
       }
     }
 
     return m;
+  }
+
+  Class classForType(DartType type) => type.accept(ClassForType(coreTypes));
+
+  Class upperBound(Class a, Class b) {
+    if (hierarchy.isSubclassOf(b, a)) return a;
+    if (hierarchy.isSubclassOf(a, b)) return b;
+    Set<Class> supers(Class cls) =>
+        {for (Class? c = cls.superclass; c != null; c = c.superclass) c};
+    Set<Class> aSupers = supers(a);
+    assert(!aSupers.contains(b));
+    Class c;
+    for (c = b.superclass!; !aSupers.contains(c); c = c.superclass!);
+    return c;
   }
 
   w.ValueType translateType(DartType type) {
@@ -137,8 +156,8 @@ class Translator {
         DartType typeArg = type.typeArguments.single;
         return w.RefType.def(arrayType(typeArg), nullable: true);
       }
-      return classInfo[type.classNode]!.repr.withNullability(
-          !optionParameterNullability || type.isPotentiallyNullable);
+      return w.RefType.def(classInfo[type.classNode]!.repr.struct,
+          nullable: !optionParameterNullability || type.isPotentiallyNullable);
     }
     if (type is DynamicType) {
       return translateType(coreTypes.objectNullableRawType);
@@ -166,10 +185,22 @@ class Translator {
           ..elementType = w.FieldType(translateType(type)));
   }
 
-  bool shouldInline(Member target) {
+  Member? singleTarget(Member interfaceTarget, DartType receiverType,
+      {required bool setter}) {
+    while (receiverType is TypeParameterType) receiverType = receiverType.bound;
+    Class receiverClass = receiverType is InterfaceType
+        ? receiverType.classNode
+        : coreTypes.objectClass;
+    return subtypes.getSingleTargetForInterfaceInvocation(interfaceTarget,
+        receiverClass: receiverClass, setter: setter);
+  }
+
+  bool shouldInline(Reference target) {
     if (!optionInlning) return false;
-    Statement? body = target.function!.body;
-    return body != null && NodeCounter().countNodes(body) < 5;
+    Member member = target.asMember;
+    if (member is Field) return true;
+    Statement? body = member.function!.body;
+    return body != null && NodeCounter().countNodes(body) < 4;
   }
 }
 
@@ -185,5 +216,45 @@ class NodeCounter extends Visitor<void> with VisitorVoidMixin {
   void defaultNode(Node node) {
     count++;
     node.visitChildren(this);
+  }
+}
+
+class ClassForType extends DartTypeVisitor<Class> {
+  final CoreTypes coreTypes;
+
+  ClassForType(this.coreTypes);
+
+  Class defaultDartType(DartType node) => throw "Unsupported type $node";
+
+  Class visitDynamicType(DynamicType node) => coreTypes.objectClass;
+  Class visitVoidType(VoidType node) => coreTypes.objectClass;
+  Class visitInterfaceType(InterfaceType node) => node.classNode;
+  Class visitFutureOrType(FutureOrType node) => coreTypes.objectClass;
+  Class visitFunctionType(FunctionType node) => coreTypes.objectClass; // TODO
+  Class visitTypeParameterType(TypeParameterType node) =>
+      node.bound.accept(this);
+  Class visitNeverType(NeverType node) => coreTypes.objectClass;
+  Class visitNullType(NullType node) => coreTypes.objectClass;
+}
+
+extension GetterSetterReference on Reference {
+  bool get isImplicitGetter {
+    Member member = asMember;
+    return member is Field && member.getterReference == this;
+  }
+
+  bool get isImplicitSetter {
+    Member member = asMember;
+    return member is Field && member.setterReference == this;
+  }
+
+  bool get isGetter {
+    Member member = asMember;
+    return member is Procedure && member.isGetter || isImplicitGetter;
+  }
+
+  bool get isSetter {
+    Member member = asMember;
+    return member is Procedure && member.isSetter || isImplicitSetter;
   }
 }

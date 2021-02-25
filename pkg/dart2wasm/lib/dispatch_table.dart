@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:math';
+
 import 'package:dart2wasm/translator.dart';
 import 'package:dart2wasm/class_info.dart';
 
@@ -10,36 +12,46 @@ import 'package:kernel/ast.dart';
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class SelectorInfo {
-  final Procedure example;
+  final int id;
+  int paramCount;
+  int returnCount;
 
-  final Map<int, Procedure> classes = {};
+  final Map<int, Reference> classes = {};
   late final int offset;
   late final w.FunctionType signature;
 
-  SelectorInfo(this.example);
+  SelectorInfo(this.id, this.paramCount, this.returnCount);
 }
 
 class DispatchTable {
   Translator translator;
 
   Map<int, SelectorInfo> selectorInfo = {};
-  late List<Procedure?> table;
+  late List<Reference?> table;
 
   DispatchTable(this.translator);
 
-  int _idForMember(Procedure member) {
+  SelectorInfo selectorForTarget(Reference target) {
     // TODO: Tearoffs
-    return member.isGetter
+    Member member = target.asMember;
+    bool isGetter = target.isGetter;
+    int selectorId = isGetter
         ? translator.tableSelectorAssigner.getterSelectorId(member)
         : translator.tableSelectorAssigner.methodOrSetterSelectorId(member);
-  }
-
-  int offsetForTarget(Procedure target) {
-    return selectorInfo[_idForMember(target)]!.offset;
-  }
-
-  w.FunctionType signatureForTarget(Procedure target) {
-    return selectorInfo[_idForMember(target)]!.signature;
+    int paramCount = isGetter
+        ? 0
+        : member is Procedure
+            ? member.function!.positionalParameters.length
+            : 1;
+    int returnCount = isGetter ||
+            member is Procedure && member.function!.returnType is! VoidType
+        ? 1
+        : 0;
+    var selector = selectorInfo.putIfAbsent(
+        selectorId, () => SelectorInfo(selectorId, paramCount, returnCount));
+    selector.paramCount = min(selector.paramCount, paramCount);
+    selector.returnCount = max(selector.returnCount, returnCount);
+    return selector;
   }
 
   void build() {
@@ -57,24 +69,20 @@ class DispatchTable {
         }
       }
 
+      void addMember(Reference reference) {
+        SelectorInfo selector = selectorForTarget(reference);
+        selector.classes[info.classId] = reference;
+        selectorIds.add(selector.id);
+      }
+
       for (Member member in info.cls.members) {
-        if (member is Procedure && member.isInstanceMember) {
-          int selectorId = _idForMember(member);
-          SelectorInfo? selector = selectorInfo[selectorId];
-          if (selector == null) {
-            selector = selectorInfo[selectorId] = SelectorInfo(member);
+        if (member.isInstanceMember) {
+          if (member is Field) {
+            addMember(member.getterReference);
+            if (member.hasSetter) addMember(member.setterReference!);
           } else {
-            //FunctionType f1 = selector.example.function
-            //    .computeFunctionType(Nullability.nonNullable);
-            //FunctionType f2 =
-            //    member.function.computeFunctionType(Nullability.nonNullable);
-            //assert(
-            //    f1 == f2,
-            //    "Changing function type on override not supported: "
-            //    "$f1 $f2");
+            addMember(member.reference);
           }
-          selector.classes[info.classId] = member;
-          selectorIds.add(selectorId);
         }
       }
       selectorsInClass.add(selectorIds);
@@ -82,16 +90,66 @@ class DispatchTable {
 
     // Compute signatures
     for (SelectorInfo selector in selectorInfo.values) {
-      ClassInfo receiver =
-          upperBound(selector.classes.keys.map((id) => translator.classes[id]));
-      FunctionNode function = selector.example.function!;
-      List<w.ValueType> inputs = [
-        InterfaceType(receiver.cls, Nullability.nonNullable),
-        ...function.positionalParameters.map((p) => p.type)
-      ].map((t) => translator.translateType(t)).toList();
-      List<w.ValueType> outputs = function.returnType is VoidType
-          ? const []
-          : [translator.translateType(function.returnType)];
+      List<Set<ClassInfo>> inputSets =
+          List.generate(1 + selector.paramCount, (_) => {});
+      List<Set<ClassInfo>> outputSets =
+          List.generate(selector.returnCount, (_) => {});
+      List<bool> inputNullable = List.filled(1 + selector.paramCount, false);
+      List<bool> outputNullable = List.filled(selector.returnCount, false);
+      selector.classes.forEach((id, target) {
+        ClassInfo receiver = translator.classes[id];
+        List<DartType> params;
+        List<DartType> returns;
+        Member member = target.asMember;
+        if (member is Field) {
+          if (target.isImplicitGetter) {
+            params = [];
+            returns = [member.getterType];
+          } else {
+            params = [member.setterType];
+            returns = [];
+          }
+        } else {
+          FunctionNode function = member.function!;
+          params = [
+            for (VariableDeclaration param in function.positionalParameters)
+              param.type
+          ];
+          returns =
+              function.returnType is VoidType ? [] : [function.returnType];
+        }
+        assert(1 + params.length >= inputSets.length);
+        assert(returns.length <= outputSets.length);
+        inputSets[0].add(receiver);
+        for (int i = 0; i < selector.paramCount; i++) {
+          inputSets[1 + i]
+              .add(translator.classInfo[translator.classForType(params[i])]!);
+          inputNullable[1 + i] |= params[i].isPotentiallyNullable;
+        }
+        for (int i = 0; i < selector.returnCount; i++) {
+          if (i < returns.length) {
+            outputSets[i].add(
+                translator.classInfo[translator.classForType(returns[i])]!);
+            outputNullable[i] |= returns[i].isPotentiallyNullable;
+          } else {
+            outputNullable[i] = true;
+          }
+        }
+      });
+      List<w.ValueType> inputs = List.generate(
+          inputSets.length,
+          (i) => translator.translateType(InterfaceType(
+              upperBound(inputSets[i]).cls,
+              inputNullable[i]
+                  ? Nullability.nullable
+                  : Nullability.nonNullable)));
+      List<w.ValueType> outputs = List.generate(
+          outputSets.length,
+          (i) => translator.translateType(InterfaceType(
+              upperBound(outputSets[i]).cls,
+              outputNullable[i]
+                  ? Nullability.nullable
+                  : Nullability.nonNullable)));
       selector.signature = translator.m.addFunctionType(inputs, outputs);
     }
 
@@ -125,7 +183,7 @@ class DispatchTable {
     w.Module m = translator.m;
     w.Table wasmTable = m.addTable(table.length);
     for (int i = 0; i < table.length; i++) {
-      Procedure? target = table[i];
+      Reference? target = table[i];
       if (target != null) {
         w.BaseFunction? fun = translator.functions[target];
         if (fun != null) {

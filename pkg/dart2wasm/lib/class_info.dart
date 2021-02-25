@@ -17,7 +17,7 @@ class ClassInfo {
   w.StructType struct;
   w.DefinedGlobal rtt;
   ClassInfo? superInfo;
-  late w.RefType repr;
+  late ClassInfo repr;
   List<ClassInfo> implementedBy = [];
 
   ClassInfo(this.cls, this.classId, this.depth, this.struct, this.rtt) {
@@ -97,8 +97,7 @@ class ClassInfoCollector {
   }
 
   void computeRepresentation(ClassInfo info) {
-    ClassInfo upper = upperBound(info.implementedBy);
-    info.repr = w.RefType.def(upper.struct, nullable: true);
+    info.repr = upperBound(info.implementedBy);
   }
 
   void generateFields(ClassInfo info) {
@@ -128,6 +127,13 @@ class ClassInfoCollector {
         initialize(cls);
       }
     }
+
+    translator.classForPrimitive[w.NumType.i32] =
+        translator.classInfo[translator.coreTypes.boolClass]!;
+    translator.classForPrimitive[w.NumType.i64] =
+        translator.classInfo[translator.coreTypes.intClass]!;
+    translator.classForPrimitive[w.NumType.f64] =
+        translator.classInfo[translator.coreTypes.doubleClass]!;
 
     for (ClassInfo info in translator.classes) {
       computeRepresentation(info);

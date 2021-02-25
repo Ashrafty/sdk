@@ -2,11 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:math';
-
 import 'package:dart2wasm/code_generator.dart';
 import 'package:kernel/ast.dart';
-import 'package:kernel/text/text_serializer.dart';
 import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
@@ -40,14 +37,14 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   Set<Expression> preserved = {};
   Map<Expression, CodeGenCallback> inject = {};
-  Map<Expression, w.ValueType> expressionType = {};
+  Map<Node, w.ValueType> expressionType = {};
   bool specializeThis = false;
 
   w.ValueType expectedType;
 
   BodyAnalyzer(this.codeGen)
       : translator = codeGen.translator,
-        voidMarker = codeGen.translator.voidMarker,
+        voidMarker = codeGen.voidMarker,
         expectedType = codeGen.translator.voidMarker {
     intrinsifier = Intrinsifier(this);
   }
@@ -77,55 +74,10 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   w.ValueType wrapExpression(Expression exp, w.ValueType expectedType) {
     this.expectedType = expectedType;
     w.ValueType resultType = exp.accept(this);
-    if (resultType == voidMarker || expectedType == voidMarker) {
-      assert(resultType != voidMarker || expectedType == voidMarker);
-      if (resultType != voidMarker) {
-        inject[exp] = (c) {
-          exp.accept(c);
-          c.b.drop();
-        };
-      }
-      return voidMarker;
-    }
-    if (!resultType.isSubtypeOf(expectedType)) {
-      if (resultType is! w.RefType && expectedType is w.RefType) {
-        // Boxing
-        var type = exp.getStaticType(codeGen.typeContext) as InterfaceType;
-        ClassInfo info = translator.classInfo[type.classNode]!;
-        assert(w.HeapType.def(info.struct).isSubtypeOf(expectedType.heapType));
-        inject[exp] = (c) {
-          c.b.i32_const(info.classId);
-          exp.accept(c);
-          c.b.global_get(info.rtt);
-          c.b.struct_new_with_rtt(info.struct);
-        };
-      } else if (resultType is w.RefType && expectedType is! w.RefType) {
-        // Unboxing
-        var type = exp.getStaticType(codeGen.typeContext) as InterfaceType;
-        ClassInfo info = translator.classInfo[type.classNode]!;
-        assert(w.HeapType.def(info.struct).isSubtypeOf(resultType.heapType));
-        inject[exp] = (c) {
-          exp.accept(c);
-          c.b.struct_get(info.struct, 1);
-        };
-      } else if (resultType.withNullability(false).isSubtypeOf(expectedType)) {
-        // Null check
-        inject[exp] = (c) {
-          exp.accept(c);
-          c.b.ref_as_non_null();
-        };
-      } else {
-        // Downcast
-        var heapType = (expectedType as w.RefType).heapType;
-        w.Global global = translator.classForHeapType[heapType]!.rtt;
-        bool checkNull = resultType.nullable && !expectedType.nullable;
-        inject[exp] = (c) {
-          exp.accept(c);
-          if (checkNull) c.b.ref_as_non_null();
-          c.b.global_get(global);
-          c.b.ref_cast();
-        };
-      }
+    CodeGenCallback? conversion = codeGen.convertTypeCallback(
+        resultType, expectedType, (c) => exp.accept(c));
+    if (conversion != null) {
+      inject[exp] = conversion;
       return expectedType;
     }
     return resultType;
@@ -137,7 +89,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   visitSuperInitializer(SuperInitializer node) {
-    w.BaseFunction? function = translator.functions[node.target];
+    w.BaseFunction? function = translator.functions[node.target.reference];
     if (function != null) {
       return _visitArguments(node.arguments, function.type, 1);
     }
@@ -189,7 +141,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   visitReturnStatement(ReturnStatement node) {
     if (node.expression != null) {
-      wrapExpression(node.expression!, _returnType(codeGen.function.type));
+      wrapExpression(node.expression!, codeGen.returnType);
     }
     return voidMarker;
   }
@@ -232,20 +184,22 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitInstanceGet(InstanceGet node) {
-    // TODO: Use devirtualization to determine whether this is a direct field
-    // access.
-    Member target = node.interfaceTarget;
+    Member? singleTarget = translator.singleTarget(
+        node.interfaceTarget, node.receiver.getStaticType(codeGen.typeContext),
+        setter: false);
     w.ValueType receiverType;
     w.ValueType resultType;
-    if (target is Field) {
+    if (singleTarget is Field) {
       // Direct field access
-      w.StructType struct = translator.classInfo[target.enclosingClass]!.struct;
+      w.StructType struct =
+          translator.classInfo[singleTarget.enclosingClass]!.struct;
       receiverType = w.RefType.def(struct, nullable: true);
-      resultType = struct.fields[translator.fieldIndex[target]!].type.unpacked;
+      resultType =
+          struct.fields[translator.fieldIndex[singleTarget]!].type.unpacked;
     } else {
       // Instance call of getter
-      int selectorId =
-          translator.tableSelectorAssigner.getterSelectorId(target);
+      int selectorId = translator.tableSelectorAssigner
+          .getterSelectorId(node.interfaceTarget);
       w.FunctionType signature =
           translator.dispatchTable.selectorInfo[selectorId]!.signature;
       receiverType = signature.inputs[0];
@@ -257,20 +211,22 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   w.ValueType visitInstanceSet(InstanceSet node) {
     w.ValueType expectedType = this.expectedType;
-    // TODO: Use devirtualization to determine whether this is a direct field
-    // access.
-    Member target = node.interfaceTarget;
+    Member? singleTarget = translator.singleTarget(
+        node.interfaceTarget, node.receiver.getStaticType(codeGen.typeContext),
+        setter: false);
     w.ValueType receiverType;
     w.ValueType valueType;
-    if (target is Field) {
+    if (singleTarget is Field) {
       // Direct field access
-      w.StructType struct = translator.classInfo[target.enclosingClass]!.struct;
+      w.StructType struct =
+          translator.classInfo[singleTarget.enclosingClass]!.struct;
       receiverType = w.RefType.def(struct, nullable: true);
-      valueType = struct.fields[translator.fieldIndex[target]!].type.unpacked;
+      valueType =
+          struct.fields[translator.fieldIndex[singleTarget]!].type.unpacked;
     } else {
       // Instance call of setter
-      int selectorId =
-          translator.tableSelectorAssigner.methodOrSetterSelectorId(target);
+      int selectorId = translator.tableSelectorAssigner
+          .methodOrSetterSelectorId(node.interfaceTarget);
       w.FunctionType signature =
           translator.dispatchTable.selectorInfo[selectorId]!.signature;
       receiverType = signature.inputs[0];
@@ -285,10 +241,6 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     return voidMarker;
   }
 
-  w.ValueType _returnType(w.FunctionType signature) {
-    return signature.outputs.isEmpty ? voidMarker : signature.outputs.single;
-  }
-
   w.ValueType _visitArguments(
       Arguments arguments, w.FunctionType signature, int signatureOffset) {
     assert(arguments.positional.length ==
@@ -297,18 +249,19 @@ class BodyAnalyzer extends Visitor<w.ValueType>
       wrapExpression(
           arguments.positional[i], signature.inputs[signatureOffset + i]);
     }
-    return _returnType(signature);
+    return codeGen.outputOrVoid(signature.outputs);
   }
 
   w.ValueType _visitThis(w.ValueType expectedType) {
-    w.ValueType thisParameterType = codeGen.function.type.inputs[0];
+    w.ValueType thisParameterType = codeGen.paramLocals[0].type;
     if (expectedType == voidMarker ||
         thisParameterType.isSubtypeOf(expectedType)) {
       return thisParameterType.withNullability(true);
     }
     specializeThis = true;
-    return translator.classInfo[codeGen.member.enclosingClass]!.repr
-        .withNullability(true);
+    return w.RefType.def(
+        translator.classInfo[codeGen.member.enclosingClass]!.repr.struct,
+        nullable: true);
   }
 
   w.ValueType visitInstanceInvocation(InstanceInvocation node) {
@@ -316,8 +269,9 @@ class BodyAnalyzer extends Visitor<w.ValueType>
       w.ValueType? intrinsicResult = intrinsifier.getOperatorIntrinsic(node);
       if (intrinsicResult != null) return intrinsicResult;
     }
-    w.FunctionType signature =
-        translator.dispatchTable.signatureForTarget(node.interfaceTarget);
+    w.FunctionType signature = translator.dispatchTable
+        .selectorForTarget(node.interfaceTarget.reference)
+        .signature;
     wrapExpression(node.receiver, signature.inputs[0]);
     return _visitArguments(node.arguments, signature, 1);
   }
@@ -338,8 +292,9 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitSuperMethodInvocation(SuperMethodInvocation node) {
-    w.FunctionType signature =
-        translator.dispatchTable.signatureForTarget(node.interfaceTarget!);
+    w.FunctionType signature = translator.dispatchTable
+        .selectorForTarget(node.interfaceTarget!.reference)
+        .signature;
     _visitThis(signature.inputs[0]);
     return _visitArguments(node.arguments, signature, 1);
   }
@@ -347,12 +302,14 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   w.ValueType visitStaticInvocation(StaticInvocation node) {
     w.ValueType? intrinsicResult = intrinsifier.getStaticIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
-    w.FunctionType signature = translator.functions[node.target]!.type;
+    w.FunctionType signature =
+        translator.functions[node.target.reference]!.type;
     return _visitArguments(node.arguments, signature, 0);
   }
 
   w.ValueType visitConstructorInvocation(ConstructorInvocation node) {
-    w.FunctionType signature = translator.functions[node.target]!.type;
+    w.FunctionType signature =
+        translator.functions[node.target.reference]!.type;
     _visitArguments(node.arguments, signature, 1);
     if (expectedType != voidMarker) {
       preserved.add(node);
@@ -403,7 +360,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   w.ValueType visitConstantExpression(ConstantExpression node) {
     if (node.constant is NullConstant) {
-      return expressionType[node] = expectedType.withNullability(true);
+      return expressionType[node.constant] = expectedType.withNullability(true);
     }
     return typeOfExp(node);
   }

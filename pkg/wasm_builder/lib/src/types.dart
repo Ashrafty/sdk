@@ -137,7 +137,7 @@ class RefType extends ValueType {
 
   @override
   ValueType withNullability(bool nullable) =>
-      RefType(heapType, nullable: nullable);
+      nullable == this.nullable ? this : RefType(heapType, nullable: nullable);
 
   @override
   bool isSubtypeOf(StorageType other) {

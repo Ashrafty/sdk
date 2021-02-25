@@ -89,9 +89,14 @@ class Module with SerializerMixin {
     return global;
   }
 
+  void _addExport(Export export) {
+    assert(!exports.any((e) => e.name == export.name), export.name);
+    exports.add(export);
+  }
+
   void exportFunction(String name, BaseFunction function) {
     function.exportedName = name;
-    exports.add(FunctionExport(name, function));
+    _addExport(FunctionExport(name, function));
   }
 
   void exportGlobal(String name, Global global) {
