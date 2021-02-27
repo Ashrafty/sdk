@@ -19,6 +19,7 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class TranslatorOptions {
   bool inlining = false;
+  bool localNullability = false;
   bool parameterNullability = true;
   bool polymorphicSpecialization = false;
   bool printKernel = false;
@@ -183,6 +184,10 @@ class Translator {
         type,
         () => m.addArrayType("List<${type.toText(defaultAstTextStrategy)}>")
           ..elementType = w.FieldType(translateType(type)));
+  }
+
+  w.ValueType typeForLocal(w.ValueType type) {
+    return options.localNullability ? type : type.withNullability(true);
   }
 
   Member? singleTarget(Member interfaceTarget, DartType receiverType,

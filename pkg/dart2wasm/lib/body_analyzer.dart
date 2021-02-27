@@ -63,9 +63,9 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     member.function!.body!.accept(this);
   }
 
-  w.ValueType translateType(DartType type) {
-    return translator.translateType(type);
-  }
+  w.ValueType translateType(DartType type) => translator.translateType(type);
+
+  w.ValueType typeForLocal(w.ValueType type) => translator.typeForLocal(type);
 
   w.ValueType typeOfExp(Expression exp) {
     return translateType(exp.getStaticType(codeGen.typeContext));
@@ -149,8 +149,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   visitVariableDeclaration(VariableDeclaration node) {
     Expression? initializer = node.initializer;
     if (initializer != null) {
-      wrapExpression(
-          initializer, translateType(node.type).withNullability(true));
+      wrapExpression(initializer, typeForLocal(translateType(node.type)));
     }
     return voidMarker;
   }
@@ -169,13 +168,13 @@ class BodyAnalyzer extends Visitor<w.ValueType>
         return promotedType;
       }
     }
-    return translateType(node.variable.type).withNullability(true);
+    return typeForLocal(translateType(node.variable.type));
   }
 
   w.ValueType visitVariableSet(VariableSet node) {
     w.ValueType expectedType = this.expectedType;
     w.ValueType valueType = wrapExpression(
-        node.value, translateType(node.variable.type).withNullability(true));
+        node.value, typeForLocal(translateType(node.variable.type)));
     if (expectedType != voidMarker) {
       preserved.add(node);
       return valueType;
@@ -256,12 +255,12 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     w.ValueType thisParameterType = codeGen.paramLocals[0].type;
     if (expectedType == voidMarker ||
         thisParameterType.isSubtypeOf(expectedType)) {
-      return thisParameterType.withNullability(true);
+      return typeForLocal(thisParameterType);
     }
     specializeThis = true;
-    return w.RefType.def(
+    return typeForLocal(w.RefType.def(
         translator.classInfo[codeGen.member.enclosingClass]!.repr.struct,
-        nullable: true);
+        nullable: false));
   }
 
   w.ValueType visitInstanceInvocation(InstanceInvocation node) {
@@ -314,7 +313,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     if (expectedType != voidMarker) {
       preserved.add(node);
       ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
-      return w.RefType.def(info.struct, nullable: true);
+      return typeForLocal(w.RefType.def(info.struct, nullable: false));
     }
     return voidMarker;
   }
@@ -384,7 +383,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   w.ValueType visitLet(Let node) {
     w.ValueType expectedType = this.expectedType;
     wrapExpression(node.variable.initializer!,
-        translateType(node.variable.type).withNullability(true));
+        typeForLocal(translateType(node.variable.type)));
     return wrapExpression(node.body, expectedType);
   }
 

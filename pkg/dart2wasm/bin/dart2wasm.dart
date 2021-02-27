@@ -109,6 +109,7 @@ class WasmTarget extends Target {
 main(List<String> args) async {
   final Map<String, void Function(TranslatorOptions, bool)> optionMap = {
     "inlining": (o, value) => o.inlining = value,
+    "local-nullability": (o, value) => o.localNullability = value,
     "parameter-nullability": (o, value) => o.parameterNullability = value,
     "polymorphic-specialization": (o, value) =>
         o.polymorphicSpecialization = value,

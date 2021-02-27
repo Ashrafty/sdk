@@ -36,6 +36,10 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   ClassInfo get object => translator.classes[0];
 
+  w.ValueType translateType(DartType type) => translator.translateType(type);
+
+  w.ValueType typeForLocal(w.ValueType type) => translator.typeForLocal(type);
+
   void defaultNode(Node node) {
     throw "Not supported: ${node.runtimeType}";
   }
@@ -123,8 +127,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     } else if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       if (bodyAnalyzer.specializeThis) {
-        thisLocal =
-            function.addLocal(w.RefType.def(info.repr.struct, nullable: true));
+        thisLocal = function.addLocal(
+            typeForLocal(w.RefType.def(info.repr.struct, nullable: false)));
         b.local_get(paramLocals[0]);
         b.global_get(info.rtt);
         b.ref_cast();
@@ -235,7 +239,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     w.BaseFunction targetFunction = translator.functions[target]!;
     if (translator.shouldInline(target)) {
       List<w.Local> inlinedLocals = targetFunction.type.inputs
-          .map((t) => function.addLocal(t.withNullability(true)))
+          .map((t) => function.addLocal(typeForLocal(t)))
           .toList();
       for (w.Local local in inlinedLocals.reversed) {
         b.local_set(local);
@@ -281,8 +285,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitVariableDeclaration(VariableDeclaration node) {
-    w.ValueType type = translator.translateType(node.type);
-    w.Local local = function.addLocal(type.withNullability(true));
+    w.ValueType type = translateType(node.type);
+    w.Local local = function.addLocal(typeForLocal(type));
     locals[node] = local;
     if (node.initializer != null) {
       wrap(node.initializer!);
@@ -422,8 +426,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitConstructorInvocation(ConstructorInvocation node) {
     ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
-    w.Local temp =
-        function.addLocal(w.RefType.def(info.repr.struct, nullable: true));
+    w.Local temp = function.addLocal(
+        typeForLocal(w.RefType.def(info.repr.struct, nullable: false)));
     b.global_get(info.rtt);
     b.struct_new_default_with_rtt(info.struct);
     b.local_tee(temp);
@@ -494,8 +498,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
 
     // Receiver is already on stack.
-    w.Local receiver =
-        function.addLocal(w.RefType.def(object.struct, nullable: true));
+    w.Local receiver = function
+        .addLocal(typeForLocal(w.RefType.def(object.struct, nullable: false)));
     b.local_tee(receiver);
     pushArguments();
 
@@ -615,8 +619,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     wrap(node.receiver);
     bool preserved = bodyAnalyzer.preserved.contains(node);
     w.Local? temp = preserved
-        ? function.addLocal(
-            translator.translateType(node.value.getStaticType(typeContext)))
+        ? function
+            .addLocal(translateType(node.value.getStaticType(typeContext)))
         : null;
     Member? singleTarget = translator.singleTarget(
         node.interfaceTarget, node.receiver.getStaticType(typeContext),
