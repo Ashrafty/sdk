@@ -107,13 +107,26 @@ class WasmTarget extends Target {
 }
 
 main(List<String> args) async {
+  final Map<String, void Function(TranslatorOptions, bool)> optionMap = {
+    "inlining": (o, value) => o.inlining = value,
+    "parameter-nullability": (o, value) => o.parameterNullability = value,
+    "polymorphic-specialization": (o, value) =>
+        o.polymorphicSpecialization = value,
+    "print-kernel": (o, value) => o.printKernel = value,
+    "print-wasm": (o, value) => o.printWasm = value,
+  };
+
+  TranslatorOptions options = TranslatorOptions();
   List<String> nonOptions = [];
-  Map<String, bool> options = {};
   for (String arg in args) {
     if (arg.startsWith("--no-")) {
-      options[arg.substring(5)] = false;
+      var optionFun = optionMap[arg.substring(5)];
+      if (optionFun == null) throw "Unknown option $arg";
+      optionFun(options, false);
     } else if (arg.startsWith("--")) {
-      options[arg.substring(2)] = true;
+      var optionFun = optionMap[arg.substring(2)];
+      if (optionFun == null) throw "Unknown option $arg";
+      optionFun(options, true);
     } else {
       nonOptions.add(arg);
     }
@@ -158,11 +171,6 @@ main(List<String> args) async {
       compilerResult.coreTypes,
       TypeEnvironment(compilerResult.coreTypes, compilerResult.classHierarchy),
       tableSelectorAssigner,
-      optionInlning: options["inlining"] ?? false,
-      optionParameterNullability: options["parameter-nullability"] ?? false,
-      optionPolymorphicSpecialization:
-          options["polymorphic-specialization"] ?? false,
-      optionPrintKernel: options["print-kernel"] ?? false,
-      optionPrintWasm: options["print-wasm"] ?? false);
+      options);
   File(output).writeAsBytesSync(translator.translate().encode());
 }

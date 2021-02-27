@@ -264,7 +264,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       return;
     }
     b.local_get(thisLocal!);
-    if (translator.optionParameterNullability && thisLocal!.type.nullable) {
+    if (translator.options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
     _visitArguments(node.arguments);
@@ -444,7 +444,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitSuperMethodInvocation(SuperMethodInvocation node) {
     b.local_get(thisLocal!);
-    if (translator.optionParameterNullability && thisLocal!.type.nullable) {
+    if (translator.options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
     _visitArguments(node.arguments);
@@ -499,7 +499,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.local_tee(receiver);
     pushArguments();
 
-    if (translator.optionPolymorphicSpecialization) {
+    if (translator.options.polymorphicSpecialization) {
       return _polymorphicSpecialization(selector, receiver);
     }
 

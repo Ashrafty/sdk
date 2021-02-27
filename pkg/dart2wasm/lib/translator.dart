@@ -17,12 +17,16 @@ import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+class TranslatorOptions {
+  bool inlining = false;
+  bool parameterNullability = true;
+  bool polymorphicSpecialization = false;
+  bool printKernel = false;
+  bool printWasm = false;
+}
+
 class Translator {
-  final bool optionInlning;
-  final bool optionParameterNullability;
-  final bool optionPolymorphicSpecialization;
-  final bool optionPrintKernel;
-  final bool optionPrintWasm;
+  final TranslatorOptions options;
 
   Component component;
   List<Library> libraries;
@@ -47,12 +51,7 @@ class Translator {
   Map<DartType, w.ArrayType> arrayTypeCache = {};
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
-      this.tableSelectorAssigner,
-      {required this.optionInlning,
-      required this.optionParameterNullability,
-      required this.optionPolymorphicSpecialization,
-      required this.optionPrintKernel,
-      required this.optionPrintWasm})
+      this.tableSelectorAssigner, this.options)
       : libraries = [component.libraries.first],
         hierarchy =
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
@@ -90,10 +89,10 @@ class Translator {
       w.BaseFunction function = functions[reference]!;
       if (function is w.DefinedFunction) {
         String exportName = reference.isSetter ? "$member=" : "$member";
-        if (optionPrintKernel || optionPrintWasm) {
+        if (options.printKernel || options.printWasm) {
           print("#${function.index}: $exportName");
         }
-        if (optionPrintKernel) {
+        if (options.printKernel) {
           if (member is Constructor) {
             Class cls = member.enclosingClass!;
             for (Field field in cls.fields) {
@@ -109,11 +108,11 @@ class Translator {
           if (body != null) {
             print(body);
           }
-          if (!optionPrintWasm) print("");
+          if (!options.printWasm) print("");
         }
         m.exportFunction(exportName, function);
         codeGen.generate(reference, function);
-        if (optionPrintWasm) print(function.body.trace);
+        if (options.printWasm) print(function.body.trace);
       }
     }
 
@@ -157,7 +156,8 @@ class Translator {
         return w.RefType.def(arrayType(typeArg), nullable: true);
       }
       return w.RefType.def(classInfo[type.classNode]!.repr.struct,
-          nullable: !optionParameterNullability || type.isPotentiallyNullable);
+          nullable:
+              !options.parameterNullability || type.isPotentiallyNullable);
     }
     if (type is DynamicType) {
       return translateType(coreTypes.objectNullableRawType);
@@ -196,7 +196,7 @@ class Translator {
   }
 
   bool shouldInline(Reference target) {
-    if (!optionInlning) return false;
+    if (!options.inlining) return false;
     Member member = target.asMember;
     if (member is Field) return true;
     Statement? body = member.function!.body;
