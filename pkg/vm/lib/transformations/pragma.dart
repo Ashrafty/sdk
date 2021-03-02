@@ -7,7 +7,7 @@ library vm.transformations.pragma;
 import 'package:kernel/ast.dart';
 import 'package:kernel/core_types.dart' show CoreTypes;
 
-const kEntryPointPragmaName = "vm:entry-point";
+const kEntryPointPragmaName = "wasm:entry-point";
 const kExactResultTypePragmaName = "vm:exact-result-type";
 const kNonNullableResultType = "vm:non-nullable-result-type";
 const kResultTypeUsesPassedTypeArguments =

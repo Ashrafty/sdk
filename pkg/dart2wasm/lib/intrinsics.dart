@@ -5,6 +5,7 @@
 import 'package:kernel/ast.dart';
 
 import 'package:dart2wasm/body_analyzer.dart';
+import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
 import 'package:dart2wasm/translator.dart';
 
@@ -232,6 +233,27 @@ class Intrinsifier {
         c.b.ref_eq();
       };
       return w.NumType.i32;
+    }
+
+    if (node.target.enclosingLibrary.name == "dart._internal" &&
+        node.name.name == "unsafeCast") {
+      Expression operand = node.arguments.positional.single;
+      w.ValueType object = w.RefType.def(
+          bodyAnalyzer.codeGen.object.repr.struct,
+          nullable: true);
+      DartType targetType = node.arguments.types.single;
+      InterfaceType interfaceType = targetType is InterfaceType
+          ? targetType
+          : translator.coreTypes.objectNullableRawType;
+      ClassInfo info = translator.classInfo[interfaceType.classNode]!;
+      bodyAnalyzer.wrapExpression(operand, object);
+      bodyAnalyzer.inject[node] = (c) {
+        c.wrap(operand);
+        c.b.global_get(info.repr.rtt);
+        c.b.ref_cast();
+      };
+      return w.RefType.def(info.repr.struct,
+          nullable: targetType.isPotentiallyNullable);
     }
 
     if (node.target.enclosingClass == translator.coreTypes.listClass &&

@@ -54,7 +54,7 @@ class Translator {
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
       this.tableSelectorAssigner, this.options)
-      : libraries = [component.libraries.first],
+      : libraries = component.libraries,
         hierarchy =
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
     subtypes = hierarchy.computeSubtypesInformation();

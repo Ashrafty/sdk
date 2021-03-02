@@ -51,8 +51,13 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   void generate(Reference reference, w.DefinedFunction function,
       {List<w.Local>? inlinedLocals, w.Label? returnLabel}) {
     Member member = reference.asMember;
+    b = function.body;
     if (member.isExternal) {
-      print("External member: $member");
+      // TODO: This just works for identical and Object.==
+      assert(function.type.outputs.length == 1 &&
+          function.type.outputs.single == w.NumType.i32);
+      b.i32_const(0);
+      b.end();
       return;
     }
 
@@ -63,7 +68,6 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     this.returnLabel = returnLabel;
     returnType =
         outputOrVoid(returnLabel?.targetTypes ?? function.type.outputs);
-    b = function.body;
 
     if (member is Field) {
       // Implicit getter or setter
@@ -671,6 +675,24 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
+  void visitStringConcatenation(StringConcatenation node) {
+    // TODO: Call toString and concatenate
+    for (Expression expression in node.expressions) {
+      wrap(expression);
+      b.drop();
+    }
+    ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
+    b.i32_const(info.classId);
+    b.global_get(info.rtt);
+    b.struct_new_with_rtt(info.struct);
+  }
+
+  void visitThrow(Throw node) {
+    wrap(node.expression);
+    // TODO: Throw exception
+    b.unreachable();
+  }
+
   void visitConstantExpression(ConstantExpression node) {
     node.constant.accept(this);
   }
@@ -697,6 +719,14 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitDoubleConstant(DoubleConstant node) {
     b.f64_const(node.value);
+  }
+
+  void visitStringLiteral(StringLiteral node) {
+    // TODO: String contents
+    ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
+    b.i32_const(info.classId);
+    b.global_get(info.rtt);
+    b.struct_new_with_rtt(info.struct);
   }
 
   void visitAsExpression(AsExpression node) {

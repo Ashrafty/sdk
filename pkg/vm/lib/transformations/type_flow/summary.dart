@@ -252,7 +252,7 @@ class Call extends Statement {
       final Type type = args.values[i].getComputedType(computedTypes);
       if (type == const EmptyType()) {
         debugPrint("Optimized call with empty arg");
-        return const EmptyType();
+        //return const EmptyType();
       }
       argTypes[i] = type;
     }

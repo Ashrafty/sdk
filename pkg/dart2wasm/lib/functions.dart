@@ -75,11 +75,7 @@ class FunctionCollector extends MemberVisitor<void> {
       params = [if (target.isImplicitSetter) member.setterType];
     } else {
       FunctionNode function = member.function!;
-      if (function.namedParameters.isNotEmpty ||
-          function.requiredParameterCount <
-              function.positionalParameters.length) {
-        throw "Optional parameters not supported";
-      }
+      // TODO: Support optional parameters
       params = function.positionalParameters.map((p) => p.type);
     }
 

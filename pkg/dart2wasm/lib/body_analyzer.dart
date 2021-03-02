@@ -283,10 +283,10 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   w.ValueType visitEqualsCall(EqualsCall node) {
     w.ValueType? intrinsicResult = intrinsifier.getEqualsIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
-    w.ValueType object =
+    w.ValueType objectType =
         translateType(translator.coreTypes.objectNullableRawType);
-    wrapExpression(node.left, object);
-    wrapExpression(node.right, object);
+    wrapExpression(node.left, objectType);
+    wrapExpression(node.right, objectType);
     return w.NumType.i32;
   }
 
@@ -376,6 +376,10 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     return w.NumType.f64;
   }
 
+  w.ValueType visitStringLiteral(StringLiteral node) {
+    return translateType(translator.coreTypes.stringNonNullableRawType);
+  }
+
   w.ValueType visitNullLiteral(NullLiteral node) {
     return expressionType[node] = expectedType.withNullability(true);
   }
@@ -391,5 +395,20 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     w.ValueType expectedType = this.expectedType;
     node.body.accept(this);
     return wrapExpression(node.value, expectedType);
+  }
+
+  w.ValueType visitStringConcatenation(StringConcatenation node) {
+    w.ValueType objectType =
+        translateType(translator.coreTypes.objectNullableRawType);
+    for (Expression expression in node.expressions) {
+      wrapExpression(expression, objectType);
+    }
+    return translateType(translator.coreTypes.stringNonNullableRawType);
+  }
+
+  w.ValueType visitThrow(Throw node) {
+    w.ValueType expectedType = this.expectedType;
+    wrapExpression(node.expression, typeOfExp(node.expression));
+    return expectedType;
   }
 }
