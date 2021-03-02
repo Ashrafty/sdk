@@ -613,7 +613,7 @@ class Instructions with SerializerMixin {
     assert(_verifyTypes(const [], [Rtt(dataType, 0)],
         trace: ['rtt.canon', dataType]));
     writeBytes(const [0xFB, 0x30]);
-    writeUnsigned(dataType.index);
+    writeSigned(dataType.index);
   }
 
   bool _verifyRttSub(DataType subType) {
@@ -632,7 +632,7 @@ class Instructions with SerializerMixin {
   void rtt_sub(DataType dataType) {
     assert(_verifyRttSub(dataType));
     writeBytes(const [0xFB, 0x31]);
-    writeUnsigned(dataType.index);
+    writeSigned(dataType.index);
   }
 
   bool _verifyCast(List<ValueType> Function(List<ValueType>) outputsFun,

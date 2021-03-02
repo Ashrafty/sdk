@@ -109,6 +109,7 @@ mixin SerializerMixin implements Serializer {
     if (watchPoints != null) {
       for (int watchPoint in watchPoints) {
         if (_index <= watchPoint && watchPoint < _index + chunk.data.length) {
+          int byteValue = chunk.data[watchPoint - _index];
           Object trace = this;
           int offset = watchPoint;
           while (trace is SerializerMixin) {
@@ -118,7 +119,8 @@ mixin SerializerMixin implements Serializer {
             trace = trace._traces[keyOffset]!;
             offset -= keyOffset;
           }
-          print("Watch $watchPoint:\n$trace");
+          String byte = byteValue.toRadixString(16).padLeft(2, '0');
+          print("Watch $watchPoint: 0x$byte\n$trace");
         }
       }
     }

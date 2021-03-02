@@ -95,7 +95,7 @@ class Rtt extends ValueType {
     } else {
       s.writeByte(0x68);
     }
-    s.writeUnsigned(defType.index);
+    s.writeSigned(defType.index);
   }
 
   @override
