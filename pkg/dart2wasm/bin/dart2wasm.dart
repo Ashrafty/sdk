@@ -107,7 +107,7 @@ class WasmTarget extends Target {
 }
 
 main(List<String> args) async {
-  final Map<String, void Function(TranslatorOptions, bool)> optionMap = {
+  final Map<String, void Function(TranslatorOptions, bool)> boolOptionMap = {
     "inlining": (o, value) => o.inlining = value,
     "local-nullability": (o, value) => o.localNullability = value,
     "parameter-nullability": (o, value) => o.parameterNullability = value,
@@ -116,22 +116,37 @@ main(List<String> args) async {
     "print-kernel": (o, value) => o.printKernel = value,
     "print-wasm": (o, value) => o.printWasm = value,
   };
+  final Map<String, void Function(TranslatorOptions, int)> intOptionMap = {
+    "watch": (o, value) => (o.watchPoints ??= []).add(value),
+  };
 
   TranslatorOptions options = TranslatorOptions();
   List<String> nonOptions = [];
+  void Function(TranslatorOptions, int)? intOptionFun = null;
   for (String arg in args) {
-    if (arg.startsWith("--no-")) {
-      var optionFun = optionMap[arg.substring(5)];
+    if (intOptionFun != null) {
+      intOptionFun(options, int.parse(arg));
+      intOptionFun = null;
+    } else if (arg.startsWith("--no-")) {
+      var optionFun = boolOptionMap[arg.substring(5)];
       if (optionFun == null) throw "Unknown option $arg";
       optionFun(options, false);
     } else if (arg.startsWith("--")) {
-      var optionFun = optionMap[arg.substring(2)];
-      if (optionFun == null) throw "Unknown option $arg";
-      optionFun(options, true);
+      var optionFun = boolOptionMap[arg.substring(2)];
+      if (optionFun != null) {
+        optionFun(options, true);
+      } else {
+        intOptionFun = intOptionMap[arg.substring(2)];
+        if (intOptionFun == null) throw "Unknown option $arg";
+      }
     } else {
       nonOptions.add(arg);
     }
   }
+  if (intOptionFun != null) {
+    throw "Missing argument to ${args.last}";
+  }
+
   String input = nonOptions[0];
   String output = nonOptions[1];
   Uri mainUri = resolveInputUri(input);

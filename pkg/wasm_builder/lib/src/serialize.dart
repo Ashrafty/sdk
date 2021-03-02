@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -15,6 +16,9 @@ abstract class Serializer {
   void writeName(String name);
   void write(Serializable object);
   void writeList(List<Serializable> objects);
+  void writeData(Serializer chunk, [List<int>? watchPoints]);
+
+  Uint8List get data;
 }
 
 abstract class Serializable {
@@ -22,8 +26,12 @@ abstract class Serializable {
 }
 
 mixin SerializerMixin implements Serializer {
+  static bool traceEnabled = false;
+
   Uint8List _data = Uint8List(100);
   int _index = 0;
+
+  late final SplayTreeMap<int, Object> _traces = SplayTreeMap();
 
   void _ensure(int size) {
     if (_data.length < _index + size) {
@@ -33,13 +41,19 @@ mixin SerializerMixin implements Serializer {
     }
   }
 
+  void _debugTrace(Object data) {
+    _traces[_index] ??= data;
+  }
+
   void writeByte(int byte) {
+    if (traceEnabled) _debugTrace(StackTrace.current);
     assert(byte == byte & 0xFF);
     _ensure(1);
     _data[_index++] = byte;
   }
 
   void writeBytes(List<int> bytes) {
+    if (traceEnabled) _debugTrace(StackTrace.current);
     _ensure(bytes.length);
     _data.setRange(_index, _index += bytes.length, bytes);
   }
@@ -88,6 +102,27 @@ mixin SerializerMixin implements Serializer {
   void writeList(List<Serializable> objects) {
     writeUnsigned(objects.length);
     for (int i = 0; i < objects.length; i++) write(objects[i]);
+  }
+
+  void writeData(Serializer chunk, [List<int>? watchPoints]) {
+    if (traceEnabled) _debugTrace(chunk);
+    if (watchPoints != null) {
+      for (int watchPoint in watchPoints) {
+        if (_index <= watchPoint && watchPoint < _index + chunk.data.length) {
+          Object trace = this;
+          int offset = watchPoint;
+          while (trace is SerializerMixin) {
+            int keyOffset = trace._traces.containsKey(offset)
+                ? offset
+                : trace._traces.lastKeyBefore(offset)!;
+            trace = trace._traces[keyOffset]!;
+            offset -= keyOffset;
+          }
+          print("Watch $watchPoint:\n$trace");
+        }
+      }
+    }
+    writeBytes(chunk.data);
   }
 
   Uint8List get data => Uint8List.sublistView(_data, 0, _index);

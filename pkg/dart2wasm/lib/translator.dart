@@ -24,6 +24,7 @@ class TranslatorOptions {
   bool polymorphicSpecialization = false;
   bool printKernel = false;
   bool printWasm = false;
+  List<int>? watchPoints = null;
 }
 
 class Translator {
@@ -61,7 +62,7 @@ class Translator {
   }
 
   w.Module translate() {
-    m = w.Module();
+    m = w.Module(watchPoints: options.watchPoints);
     voidMarker = w.RefType.def(w.StructType("void"), nullable: true);
 
     ClassInfoCollector(this).collect();

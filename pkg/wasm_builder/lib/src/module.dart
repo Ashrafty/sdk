@@ -9,17 +9,25 @@ import 'serialize.dart';
 import 'types.dart';
 
 class Module with SerializerMixin {
-  Map<_FunctionTypeKey, FunctionType> functionTypeMap = {};
+  final List<int>? watchPoints;
 
-  List<DefType> defTypes = [];
-  List<BaseFunction> functions = [];
-  List<Table> tables = [];
-  List<Global> globals = [];
-  List<Export> exports = [];
+  final Map<_FunctionTypeKey, FunctionType> functionTypeMap = {};
+
+  final List<DefType> defTypes = [];
+  final List<BaseFunction> functions = [];
+  final List<Table> tables = [];
+  final List<Global> globals = [];
+  final List<Export> exports = [];
   BaseFunction? startFunction = null;
 
   bool anyFunctionsDefined = false;
   bool anyGlobalsDefined = false;
+
+  Module({this.watchPoints}) {
+    if (watchPoints != null) {
+      SerializerMixin.traceEnabled = true;
+    }
+  }
 
   Iterable<Import> get imports =>
       functions.whereType<Import>().followedBy(globals.whereType<Import>());
@@ -201,8 +209,8 @@ class DefinedFunction extends BaseFunction
     // Bundle locals and body
     assert(body.isComplete);
     s.writeUnsigned(data.length + body.data.length);
-    s.writeBytes(data);
-    s.writeBytes(body.data);
+    s.writeData(this);
+    s.writeData(body);
   }
 
   @override
@@ -267,7 +275,7 @@ class DefinedGlobal extends Global implements Serializable {
   void serialize(Serializer s) {
     assert(initializer.isComplete);
     s.write(type);
-    s.writeBytes(initializer.data);
+    s.writeData(initializer);
   }
 }
 
@@ -353,7 +361,7 @@ abstract class Section with SerializerMixin implements Serializable {
       serializeContents();
       s.writeByte(id);
       s.writeUnsigned(data.length);
-      s.writeBytes(data);
+      s.writeData(this, module.watchPoints);
     }
   }
 
