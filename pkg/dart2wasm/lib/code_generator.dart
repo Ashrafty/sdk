@@ -34,6 +34,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   CodeGenerator(this.translator) : voidMarker = translator.voidMarker;
 
+  TranslatorOptions get options => translator.options;
+
   ClassInfo get object => translator.classes[0];
 
   w.ValueType translateType(DartType type) => translator.translateType(type);
@@ -272,7 +274,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       return;
     }
     b.local_get(thisLocal!);
-    if (translator.options.parameterNullability && thisLocal!.type.nullable) {
+    if (options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
     _visitArguments(node.arguments);
@@ -438,6 +440,9 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.local_get(temp);
     b.i32_const(info.classId);
     b.struct_set(info.struct, 0);
+    if (options.parameterNullability && temp.type.nullable) {
+      b.ref_as_non_null();
+    }
     _visitArguments(node.arguments);
     _call(node.target.reference);
     if (bodyAnalyzer.preserved.contains(node)) {
@@ -452,7 +457,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitSuperMethodInvocation(SuperMethodInvocation node) {
     b.local_get(thisLocal!);
-    if (translator.options.parameterNullability && thisLocal!.type.nullable) {
+    if (options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
     _visitArguments(node.arguments);
@@ -502,12 +507,15 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
 
     // Receiver is already on stack.
-    w.Local receiver = function
-        .addLocal(typeForLocal(w.RefType.def(object.struct, nullable: false)));
+    w.Local receiver =
+        function.addLocal(typeForLocal(selector.signature.inputs.first));
     b.local_tee(receiver);
+    if (options.parameterNullability && receiver.type.nullable) {
+      b.ref_as_non_null();
+    }
     pushArguments();
 
-    if (translator.options.polymorphicSpecialization) {
+    if (options.polymorphicSpecialization) {
       return _polymorphicSpecialization(selector, receiver);
     }
 

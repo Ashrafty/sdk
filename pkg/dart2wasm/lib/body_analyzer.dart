@@ -173,11 +173,11 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   w.ValueType visitVariableSet(VariableSet node) {
     w.ValueType expectedType = this.expectedType;
-    w.ValueType valueType = wrapExpression(
-        node.value, typeForLocal(translateType(node.variable.type)));
+    w.ValueType localType = typeForLocal(translateType(node.variable.type));
+    wrapExpression(node.value, localType);
     if (expectedType != voidMarker) {
       preserved.add(node);
-      return valueType;
+      return localType;
     }
     return voidMarker;
   }
@@ -235,7 +235,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     wrapExpression(node.value, valueType);
     if (expectedType != voidMarker) {
       preserved.add(node);
-      return valueType;
+      return typeForLocal(valueType);
     }
     return voidMarker;
   }

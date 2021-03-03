@@ -189,6 +189,13 @@ class Instructions with SerializerMixin {
     return true;
   }
 
+  bool _verifyStartOfBlock(Label label, {required List<Object> trace}) {
+    _debugTrace(
+        ["$label:", ...trace, FunctionType(label.inputs, label.outputs)],
+        reachableAfter: true, indentAfter: 1);
+    return true;
+  }
+
   bool _verifyEndOfBlock(List<ValueType> outputs,
       {required List<Object> trace,
       required bool reachableAfter,
@@ -241,9 +248,7 @@ class Instructions with SerializerMixin {
       final type = module.addFunctionType(label.inputs, label.outputs);
       writeSigned(type.index);
     }
-    _debugTrace(
-        ["$label:", ...trace, FunctionType(label.inputs, label.outputs)],
-        reachableAfter: true, indentAfter: 1);
+    assert(_verifyStartOfBlock(label, trace: trace));
     return label;
   }
 
@@ -399,7 +404,7 @@ class Instructions with SerializerMixin {
   void local_tee(Local local) {
     assert(locals[local.index] == local);
     assert(
-        _verifyTypes([local.type], [_topOfStack], trace: ['local.tee', local]));
+        _verifyTypes([local.type], [local.type], trace: ['local.tee', local]));
     writeByte(0x22);
     writeUnsigned(local.index);
   }

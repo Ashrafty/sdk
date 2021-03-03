@@ -480,7 +480,7 @@ class _DispatchableInvocation extends _Invocation {
       Type receiver,
       Map<Member, _ReceiverTypeBuilder> targets,
       TypeFlowAnalysis typeFlowAnalysis) {
-    assert(receiver != const EmptyType()); // should be filtered earlier
+    //assert(receiver != const EmptyType()); // should be filtered earlier
 
     final bool isNullableReceiver = receiver is NullableType;
     if (isNullableReceiver) {
