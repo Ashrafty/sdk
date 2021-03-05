@@ -96,7 +96,7 @@ class Translator {
         }
         if (options.printKernel) {
           if (member is Constructor) {
-            Class cls = member.enclosingClass!;
+            Class cls = member.enclosingClass;
             for (Field field in cls.fields) {
               if (field.isInstanceMember && field.initializer != null) {
                 print("${field.name}: ${field.initializer}");

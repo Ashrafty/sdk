@@ -51,7 +51,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   void analyzeMember(Member member) {
     if (member is Constructor) {
-      Class cls = member.enclosingClass!;
+      Class cls = member.enclosingClass;
       for (Field field in cls.fields) {
         if (field.isInstanceMember && field.initializer != null) {
           wrapExpression(field.initializer!,

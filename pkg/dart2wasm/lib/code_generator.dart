@@ -120,7 +120,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (member is Constructor) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       thisLocal = paramLocals[0];
-      Class cls = member.enclosingClass!;
+      Class cls = member.enclosingClass;
       for (Field field in cls.fields) {
         if (field.isInstanceMember && field.initializer != null) {
           int fieldIndex = translator.fieldIndex[field]!;
@@ -269,7 +269,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitSuperInitializer(SuperInitializer node) {
-    if ((node.parent as Constructor).enclosingClass!.superclass?.superclass ==
+    if ((node.parent as Constructor).enclosingClass.superclass?.superclass ==
         null) {
       return;
     }

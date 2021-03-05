@@ -60,7 +60,7 @@ class FunctionCollector extends MemberVisitor<void> {
 
   void visitConstructor(Constructor node) {
     _makeFunction(node.reference, VoidType(),
-        InterfaceType(node.enclosingClass!, Nullability.nonNullable),
+        InterfaceType(node.enclosingClass, Nullability.nonNullable),
         getter: false);
   }
 
