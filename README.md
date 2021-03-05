@@ -1,3 +1,7 @@
+**Note:** This branch contains a prototype Dart-to-WebAssembly compiler used for a feasibility study of
+compiling Dart to [WasmGC](https://github.com/WebAssembly/gc). As of March 2021, it is very much
+work-in-progress and will be updated and rebased regularly.
+
 # Dart
 
 ## A client-optimized language for fast apps on any platform
