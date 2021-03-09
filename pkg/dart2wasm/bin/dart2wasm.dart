@@ -35,11 +35,15 @@ import 'package:kernel/target/targets.dart';
 import 'package:kernel/transformations/mixin_full_resolution.dart'
     as transformMixins show transformLibraries;
 import 'package:kernel/type_environment.dart';
+import 'package:kernel/vm/constants_native_effects.dart'
+    show VmConstantsBackend;
 
 import 'package:vm/kernel_front_end.dart';
 import 'package:vm/target/vm.dart';
 import 'package:vm/transformations/type_flow/analysis.dart';
 import 'package:vm/transformations/type_flow/calls.dart' show DirectSelector;
+import 'package:vm/transformations/lowering.dart' as lowering
+    show transformLibraries, transformProcedure;
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 import 'package:vm/transformations/type_flow/transformer.dart' show TreeShaker;
 
@@ -50,6 +54,11 @@ class WasmTarget extends Target {
   String get name => 'wasm';
 
   TargetFlags get flags => TargetFlags(enableNullSafety: true);
+
+  @override
+  List<String> get extraIndexedLibraries => const <String>[
+        "dart:collection",
+      ];
 
   @override
   void performModularTransformationsOnLibraries(
@@ -65,11 +74,24 @@ class WasmTarget extends Target {
     transformMixins.transformLibraries(
         this, coreTypes, hierarchy, libraries, referenceFromIndex);
     logger?.call("Transformed mixin applications");
+
+    lowering.transformLibraries(
+        libraries, coreTypes, hierarchy, flags.enableNullSafety);
+    logger?.call("Lowering transformations performed");
+  }
+
+  @override
+  void performTransformationsOnProcedure(
+      CoreTypes coreTypes, ClassHierarchy hierarchy, Procedure procedure,
+      {void logger(String msg)?}) {
+    lowering.transformProcedure(
+        procedure, coreTypes, hierarchy, flags.enableNullSafety);
+    logger?.call("Lowering transformations performed");
   }
 
   @override
   ConstantsBackend constantsBackend(CoreTypes coreTypes) =>
-      new ConstantsBackend();
+      VmConstantsBackend(coreTypes);
 
   Expression instantiateInvocation(CoreTypes coreTypes, Expression receiver,
       String name, Arguments arguments, int offset, bool isSuper) {
@@ -90,6 +112,9 @@ class WasmTarget extends Target {
       bool isTopLevel: false}) {
     throw "Unsupported: instantiateNoSuchMethodError";
   }
+
+  @override
+  bool get supportsSetLiterals => false;
 
   @override
   int get enabledLateLowerings => LateLowering.all;
