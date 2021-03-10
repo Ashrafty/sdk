@@ -221,10 +221,6 @@ main(List<String> args) async {
 
   final tableSelectorAssigner = new TableSelectorAssigner(component);
 
-  print(component.libraries
-      .map((l) => "${l.name}: ${l.classes.length} ${l.members.length}")
-      .toList());
-
   var translator = Translator(
       component,
       compilerResult.coreTypes,
