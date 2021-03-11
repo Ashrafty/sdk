@@ -102,16 +102,24 @@ class Intrinsifier {
     };
   }
 
-  w.ValueType? getOperatorIntrinsic(InstanceInvocation invocation) {
+  w.ValueType? getInstanceIntrinsic(InstanceInvocation invocation) {
     DartType receiverType = dartTypeOf(invocation.receiver);
     String name = invocation.name.name;
-    if (invocation.interfaceTarget.enclosingClass ==
-        translator.coreTypes.listClass) {
+    if (invocation.interfaceTarget.enclosingClass?.superclass ==
+        translator.wasmArrayBaseClass) {
       DartType elementType =
           (receiverType as InterfaceType).typeArguments.single;
       w.ArrayType arrayType = translator.arrayType(elementType);
+      w.StorageType wasmType = arrayType.elementType.type;
+      bool innerExtend =
+          wasmType == w.PackedType.i8 || wasmType == w.PackedType.i16;
+      bool outerExtend =
+          wasmType.unpacked == w.NumType.i32 || wasmType == w.NumType.f32;
       switch (name) {
-        case '[]':
+        case 'read':
+        case 'readSigned':
+        case 'readUnsigned':
+          bool unsigned = name == 'readUnsigned';
           Expression array = invocation.receiver;
           Expression index = invocation.arguments.positional.single;
           bodyAnalyzer.wrapExpression(
@@ -121,10 +129,29 @@ class Intrinsifier {
             c.wrap(array);
             c.wrap(index);
             c.b.i32_wrap_i64();
-            c.b.array_get(arrayType);
+            if (innerExtend) {
+              if (unsigned) {
+                c.b.array_get_u(arrayType);
+              } else {
+                c.b.array_get_s(arrayType);
+              }
+            } else {
+              c.b.array_get(arrayType);
+            }
+            if (outerExtend) {
+              if (wasmType == w.NumType.f32) {
+                c.b.f64_promote_f32();
+              } else {
+                if (unsigned) {
+                  c.b.i64_extend_i32_u();
+                } else {
+                  c.b.i64_extend_i32_s();
+                }
+              }
+            }
           };
           return bodyAnalyzer.translateType(elementType);
-        case '[]=':
+        case 'write':
           Expression array = invocation.receiver;
           Expression index = invocation.arguments.positional[0];
           Expression value = invocation.arguments.positional[1];
@@ -138,11 +165,18 @@ class Intrinsifier {
             c.wrap(index);
             c.b.i32_wrap_i64();
             c.wrap(value);
+            if (outerExtend) {
+              if (wasmType == w.NumType.f32) {
+                c.b.f32_demote_f64();
+              } else {
+                c.b.i32_wrap_i64();
+              }
+            }
             c.b.array_set(arrayType);
           };
           return bodyAnalyzer.voidMarker;
         default:
-          throw "Unsupported list operator: $name";
+          throw "Unsupported array method: $name";
       }
     }
 
@@ -165,9 +199,8 @@ class Intrinsifier {
         };
         return outType;
       }
-    } else {
+    } else if (invocation.arguments.positional.length == 0) {
       // Unary operator
-      assert(invocation.arguments.positional.length == 0);
       Expression operand = invocation.receiver;
       var op = unaryOperatorMap[receiverType]?[name];
       if (op != null) {
@@ -256,8 +289,8 @@ class Intrinsifier {
           nullable: targetType.isPotentiallyNullable);
     }
 
-    if (node.target.enclosingClass == translator.coreTypes.listClass &&
-        node.name.name == "filled") {
+    if (node.target.enclosingClass?.superclass ==
+        translator.wasmArrayBaseClass) {
       Expression length = node.arguments.positional[0];
       w.ArrayType arrayType = translator.arrayType(node.arguments.types.single);
       bodyAnalyzer.wrapExpression(length, w.NumType.i64);

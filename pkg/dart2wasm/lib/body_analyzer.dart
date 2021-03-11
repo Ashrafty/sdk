@@ -264,10 +264,8 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitInstanceInvocation(InstanceInvocation node) {
-    if (node.interfaceTarget.kind == ProcedureKind.Operator) {
-      w.ValueType? intrinsicResult = intrinsifier.getOperatorIntrinsic(node);
-      if (intrinsicResult != null) return intrinsicResult;
-    }
+    w.ValueType? intrinsicResult = intrinsifier.getInstanceIntrinsic(node);
+    if (intrinsicResult != null) return intrinsicResult;
     w.FunctionType signature = translator.dispatchTable
         .selectorForTarget(node.interfaceTarget.reference)
         .signature;

@@ -45,7 +45,7 @@ class FunctionCollector extends MemberVisitor<void> {
   }
 
   void visitProcedure(Procedure node) {
-    if (!node.isAbstract) {
+    if (!node.isAbstract && !node.isExternal) {
       if (node.isInstanceMember) {
         translator.functions[node.reference] = m.addFunction(translator
             .dispatchTable
@@ -85,7 +85,9 @@ class FunctionCollector extends MemberVisitor<void> {
     }
     inputs.addAll(params.map((t) => translator.translateType(t)));
 
-    List<w.ValueType> outputs = returnType is VoidType
+    List<w.ValueType> outputs = returnType is VoidType ||
+            returnType is NeverType ||
+            returnType is NullType
         ? const []
         : [translator.translateType(returnType)];
 

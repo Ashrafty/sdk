@@ -5,12 +5,124 @@
 // part of "core_patch.dart";
 
 @pragma("vm:entry-point")
-class _List<E> extends FixedLengthListBase<E> {
-  @pragma("vm:recognized", "other")
-  @pragma("vm:exact-result-type",
-      <dynamic>[_List, "result-type-uses-passed-type-arguments"])
+abstract class _ListBase<E> extends ListBase<E> {
+  int _length;
+  WasmObjectArray<Object?> _data;
+
+  _ListBase(int length, int capacity)
+      : _length = length,
+        _data = WasmObjectArray<Object?>(capacity);
+
+  _ListBase._withData(this._length, this._data);
+
+  E operator [](int index) {
+    return unsafeCast(_data.read(index));
+  }
+
+  void operator []=(int index, E value) {
+    _data.write(index, value);
+  }
+
+  int get length => _length;
+
+  // List interface.
+  void setRange(int start, int end, Iterable<E> iterable, [int skipCount = 0]) {
+    if (start < 0 || start > this.length) {
+      throw new RangeError.range(start, 0, this.length);
+    }
+    if (end < start || end > this.length) {
+      throw new RangeError.range(end, start, this.length);
+    }
+    int length = end - start;
+    if (length == 0) return;
+    if (identical(this, iterable)) {
+      Lists.copy(this, skipCount, this, start, length);
+    } else if (iterable is List<E>) {
+      Lists.copy(iterable, skipCount, this, start, length);
+    } else {
+      Iterator<E> it = iterable.iterator;
+      while (skipCount > 0) {
+        if (!it.moveNext()) return;
+        skipCount--;
+      }
+      for (int i = start; i < end; i++) {
+        if (!it.moveNext()) return;
+        this[i] = it.current;
+      }
+    }
+  }
+
+  void setAll(int index, Iterable<E> iterable) {
+    if (index < 0 || index > this.length) {
+      throw new RangeError.range(index, 0, this.length, "index");
+    }
+    List<E> iterableAsList;
+    if (identical(this, iterable)) {
+      iterableAsList = this;
+    } else if (iterable is List<E>) {
+      iterableAsList = iterable;
+    } else {
+      for (var value in iterable) {
+        this[index++] = value;
+      }
+      return;
+    }
+    int length = iterableAsList.length;
+    if (index + length > this.length) {
+      throw new RangeError.range(index + length, 0, this.length);
+    }
+    Lists.copy(iterableAsList, 0, this, index, length);
+  }
+
+  List<E> sublist(int start, [int? end]) {
+    final int listLength = this.length;
+    final int actualEnd = RangeError.checkValidRange(start, end, listLength);
+    int length = actualEnd - start;
+    if (length == 0) return <E>[];
+    return _GrowableList<E>(length)..setRange(0, length, this);
+  }
+
+  // Iterable interface.
+
   @pragma("vm:prefer-inline")
-  factory _List(length) native "List_allocate";
+  void forEach(f(E element)) {
+    final length = this.length;
+    for (int i = 0; i < length; i++) {
+      f(this[i]);
+    }
+  }
+
+  @pragma("vm:prefer-inline")
+  Iterator<E> get iterator {
+    return new _FixedSizeArrayIterator<E>(this);
+  }
+
+  E get first {
+    if (length > 0) return this[0];
+    throw IterableElementError.noElement();
+  }
+
+  E get last {
+    if (length > 0) return this[length - 1];
+    throw IterableElementError.noElement();
+  }
+
+  E get single {
+    if (length == 1) return this[0];
+    if (length == 0) throw IterableElementError.noElement();
+    throw IterableElementError.tooMany();
+  }
+
+  List<E> toList({bool growable: true}) {
+    return List.from(this, growable: growable);
+  }
+}
+
+@pragma("vm:entry-point")
+class _List<E> extends _ListBase<E> with FixedLengthListMixin<E> {
+  _List._(int length) : super(length, length);
+
+  factory _List(int length) => _List._(length);
 
   // Specialization of List.empty constructor for growable == false.
   // Used by pkg/vm/lib/transformations/list_factory_specializer.dart.
@@ -105,140 +217,6 @@ class _List<E> extends FixedLengthListBase<E> {
     // system List types.
     return unsafeCast(makeListFixedLength(_GrowableList<E>._ofOther(elements)));
   }
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  E operator [](int index) native "List_getIndexed";
-
-  @pragma("vm:recognized", "other")
-  void operator []=(int index, E value) {
-    _setIndexed(index, value);
-  }
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  void _setIndexed(int index, E value) native "List_setIndexed";
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  @pragma("vm:prefer-inline")
-  int get length native "List_getLength";
-
-  @pragma("vm:prefer-inline")
-  _List _slice(int start, int count, bool needsTypeArgument) {
-    if (count <= 64) {
-      final result = needsTypeArgument ? new _List<E>(count) : new _List(count);
-      for (int i = 0; i < result.length; i++) {
-        result[i] = this[start + i];
-      }
-      return result;
-    } else {
-      return _sliceInternal(start, count, needsTypeArgument);
-    }
-  }
-
-  _List _sliceInternal(int start, int count, bool needsTypeArgument)
-      native "List_slice";
-
-  // List interface.
-  void setRange(int start, int end, Iterable<E> iterable, [int skipCount = 0]) {
-    if (start < 0 || start > this.length) {
-      throw new RangeError.range(start, 0, this.length);
-    }
-    if (end < start || end > this.length) {
-      throw new RangeError.range(end, start, this.length);
-    }
-    int length = end - start;
-    if (length == 0) return;
-    if (identical(this, iterable)) {
-      Lists.copy(this, skipCount, this, start, length);
-    } else if (iterable is List<E>) {
-      Lists.copy(iterable, skipCount, this, start, length);
-    } else {
-      Iterator<E> it = iterable.iterator;
-      while (skipCount > 0) {
-        if (!it.moveNext()) return;
-        skipCount--;
-      }
-      for (int i = start; i < end; i++) {
-        if (!it.moveNext()) return;
-        this[i] = it.current;
-      }
-    }
-  }
-
-  void setAll(int index, Iterable<E> iterable) {
-    if (index < 0 || index > this.length) {
-      throw new RangeError.range(index, 0, this.length, "index");
-    }
-    List<E> iterableAsList;
-    if (identical(this, iterable)) {
-      iterableAsList = this;
-    } else if (iterable is List<E>) {
-      iterableAsList = iterable;
-    } else {
-      for (var value in iterable) {
-        this[index++] = value;
-      }
-      return;
-    }
-    int length = iterableAsList.length;
-    if (index + length > this.length) {
-      throw new RangeError.range(index + length, 0, this.length);
-    }
-    Lists.copy(iterableAsList, 0, this, index, length);
-  }
-
-  List<E> sublist(int start, [int? end]) {
-    final int listLength = this.length;
-    final int actualEnd = RangeError.checkValidRange(start, end, listLength);
-    int length = actualEnd - start;
-    if (length == 0) return <E>[];
-    var result = new _GrowableList<E>._withData(_slice(start, length, false));
-    result._setLength(length);
-    return result;
-  }
-
-  // Iterable interface.
-
-  @pragma("vm:prefer-inline")
-  void forEach(f(E element)) {
-    final length = this.length;
-    for (int i = 0; i < length; i++) {
-      f(this[i]);
-    }
-  }
-
-  @pragma("vm:prefer-inline")
-  Iterator<E> get iterator {
-    return new _FixedSizeArrayIterator<E>(this);
-  }
-
-  E get first {
-    if (length > 0) return this[0];
-    throw IterableElementError.noElement();
-  }
-
-  E get last {
-    if (length > 0) return this[length - 1];
-    throw IterableElementError.noElement();
-  }
-
-  E get single {
-    if (length == 1) return this[0];
-    if (length == 0) throw IterableElementError.noElement();
-    throw IterableElementError.tooMany();
-  }
-
-  List<E> toList({bool growable: true}) {
-    var length = this.length;
-    if (length > 0) {
-      _List result = _slice(0, length, !growable);
-      if (growable) {
-        return new _GrowableList<E>._withData(result).._setLength(length);
-      }
-      return unsafeCast<_List<E>>(result);
-    }
-    // _GrowableList._withData must not be called with empty list.
-    return growable ? <E>[] : new _List<E>(0);
-  }
 }
 
 // This is essentially the same class as _List, but it does not
@@ -269,13 +247,11 @@ class _ImmutableList<E> extends UnmodifiableListBase<E> {
     final int actualEnd = RangeError.checkValidRange(start, end, this.length);
     int length = actualEnd - start;
     if (length == 0) return <E>[];
-    final list = new _List(length);
+    final list = new _GrowableList<E>(length);
     for (int i = 0; i < length; i++) {
       list[i] = this[start + i];
     }
-    final result = new _GrowableList<E>._withData(list);
-    result._setLength(length);
-    return result;
+    return list;
   }
 
   // Collection interface.
@@ -310,23 +286,7 @@ class _ImmutableList<E> extends UnmodifiableListBase<E> {
   }
 
   List<E> toList({bool growable: true}) {
-    final int length = this.length;
-    if (length > 0) {
-      if (growable) {
-        final list = new _List(length);
-        for (int i = 0; i < length; i++) {
-          list[i] = this[i];
-        }
-        return _GrowableList<E>._withData(list).._setLength(length);
-      } else {
-        final list = new _List<E>(length);
-        for (int i = 0; i < length; i++) {
-          list[i] = this[i];
-        }
-        return list;
-      }
-    }
-    return growable ? <E>[] : new _List<E>(0);
+    return List.from(this, growable: growable);
   }
 }
 

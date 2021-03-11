@@ -5,7 +5,7 @@
 // part of "core_patch.dart";
 
 @pragma("vm:entry-point")
-class _GrowableList<T> extends ListBase<T> {
+class _GrowableList<T> extends _ListBase<T> {
   void insert(int index, T element) {
     if ((index < 0) || (index > length)) {
       throw new RangeError.range(index, 0, length);
@@ -64,47 +64,20 @@ class _GrowableList<T> extends ListBase<T> {
     setAll(index, iterable);
   }
 
-  void setAll(int index, Iterable<T> iterable) {
-    if (iterable is List) {
-      setRange(index, index + iterable.length, iterable);
-    } else {
-      for (T element in iterable) {
-        this[index++] = element;
-      }
-    }
-  }
-
   void removeRange(int start, int end) {
     RangeError.checkValidRange(start, end, this.length);
     Lists.copy(this, end, this, start, this.length - end);
     this.length = this.length - (end - start);
   }
 
-  List<T> sublist(int start, [int? end]) {
-    final int actualEnd = RangeError.checkValidRange(start, end, this.length);
-    int length = actualEnd - start;
-    if (length == 0) return <T>[];
-    final list = new _List(length);
-    for (int i = 0; i < length; i++) {
-      list[i] = this[start + i];
-    }
-    final result = new _GrowableList<T>._withData(list);
-    result._setLength(length);
-    return result;
-  }
+  _GrowableList._(int length, int capacity) : super(length, capacity);
 
   factory _GrowableList(int length) {
-    var data = _allocateData(length);
-    var result = new _GrowableList<T>._withData(data);
-    if (length > 0) {
-      result._setLength(length);
-    }
-    return result;
+    return _GrowableList<T>._(length, length);
   }
 
   factory _GrowableList.withCapacity(int capacity) {
-    var data = _allocateData(capacity);
-    return new _GrowableList<T>._withData(data);
+    return _GrowableList<T>._(0, capacity);
   }
 
   // Specialization of List.empty constructor for growable == true.
@@ -201,18 +174,10 @@ class _GrowableList<T> extends ListBase<T> {
     return list;
   }
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  @pragma("vm:exact-result-type",
-      <dynamic>[_GrowableList, "result-type-uses-passed-type-arguments"])
-  factory _GrowableList._withData(_List data) native "GrowableList_allocate";
+  _GrowableList._withData(WasmObjectArray<Object?> data)
+      : super._withData(data.length, data);
 
-  @pragma("vm:recognized", "graph-intrinsic")
-  @pragma("vm:prefer-inline")
-  int get _capacity native "GrowableList_getCapacity";
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  @pragma("vm:prefer-inline")
-  int get length native "GrowableList_getLength";
+  int get _capacity => _data.length;
 
   void set length(int new_length) {
     if (new_length > length) {
@@ -236,28 +201,15 @@ class _GrowableList<T> extends ListBase<T> {
       _shrink(new_capacity, new_length);
     } else {
       for (int i = new_length; i < length; i++) {
-        _setIndexed(i, null);
+        _data.write(i, null);
       }
     }
     _setLength(new_length);
   }
 
-  @pragma("vm:recognized", "graph-intrinsic")
-  void _setLength(int new_length) native "GrowableList_setLength";
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  void _setData(_List array) native "GrowableList_setData";
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  T operator [](int index) native "GrowableList_getIndexed";
-
-  @pragma("vm:recognized", "other")
-  void operator []=(int index, T value) {
-    _setIndexed(index, value);
+  void _setLength(int new_length) {
+    _length = new_length;
   }
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  void _setIndexed(int index, T? value) native "GrowableList_setIndexed";
 
   @pragma("vm:entry-point", "call")
   @pragma("vm:prefer-inline")
@@ -330,35 +282,26 @@ class _GrowableList<T> extends ListBase<T> {
   }
 
   // Shared array used as backing for new empty growable arrays.
-  static final _List _emptyList = new _List(0);
+  static final WasmObjectArray<Object?> _emptyData =
+      WasmObjectArray<Object?>(0);
 
-  static _List _allocateData(int capacity) {
+  static WasmObjectArray<Object?> _allocateData(int capacity) {
     if (capacity == 0) {
       // Use shared empty list as backing.
-      return _emptyList;
+      return _emptyData;
     }
-    // Round up size to the next odd number, since this is free
-    // because of alignment requirements of the GC.
-    return new _List(capacity | 1);
+    return new WasmObjectArray<Object?>(capacity);
   }
 
   // Grow from 0 to 3, and then double + 1.
   int _nextCapacity(int old_capacity) => (old_capacity * 2) | 3;
 
   void _grow(int new_capacity) {
-    var newData = _allocateData(new_capacity);
-    // This is a work-around for dartbug.com/30090: array-bound-check
-    // generalization causes excessive deoptimizations because it
-    // hoists CheckArrayBound(i, ...) out of the loop below and turns it
-    // into CheckArrayBound(length - 1, ...). Which deoptimizes
-    // if length == 0. However the loop itself does not execute
-    // if length == 0.
-    if (length > 0) {
-      for (int i = 0; i < length; i++) {
-        newData[i] = this[i];
-      }
+    var newData = WasmObjectArray<Object?>(new_capacity);
+    for (int i = 0; i < length; i++) {
+      newData.write(i, this[i]);
     }
-    _setData(newData);
+    _data = newData;
   }
 
   // This method is marked as never-inline to conserve code size.
@@ -374,10 +317,10 @@ class _GrowableList<T> extends ListBase<T> {
     // This is a work-around for dartbug.com/30090. See the comment in _grow.
     if (new_length > 0) {
       for (int i = 0; i < new_length; i++) {
-        newData[i] = this[i];
+        newData.write(i, this[i]);
       }
     }
-    _setData(newData);
+    _data = newData;
   }
 
   // Iterable interface.
@@ -478,31 +421,6 @@ class _GrowableList<T> extends ListBase<T> {
     return new ListIterator<T>(this);
   }
 
-  List<T> toList({bool growable: true}) {
-    final length = this.length;
-    if (growable) {
-      if (length > 0) {
-        final list = new _List(length);
-        for (int i = 0; i < length; i++) {
-          list[i] = this[i];
-        }
-        final result = new _GrowableList<T>._withData(list);
-        result._setLength(length);
-        return result;
-      }
-      return <T>[];
-    } else {
-      if (length > 0) {
-        final list = new _List<T>(length);
-        for (int i = 0; i < length; i++) {
-          list[i] = this[i];
-        }
-        return list;
-      }
-      return List<T>.empty(growable: false);
-    }
-  }
-
   Set<T> toSet() {
     return new Set<T>.of(this);
   }
@@ -511,103 +429,85 @@ class _GrowableList<T> extends ListBase<T> {
   // [elements] contains elements that are already type checked.
   @pragma("vm:entry-point", "call")
   factory _GrowableList._literal(_List elements) {
-    final result = new _GrowableList<T>._withData(elements);
-    result._setLength(elements.length);
-    return result;
+    return _GrowableList<T>._withData(elements._data);
   }
 
   // Specialized list literal constructors.
   // Used by pkg/vm/lib/transformations/list_literals_lowering.dart.
   factory _GrowableList._literal1(T e0) {
-    _List elements = _List(1);
-    elements[0] = e0;
-    final result = new _GrowableList<T>._withData(elements);
-    result._setLength(1);
-    return result;
+    WasmObjectArray<Object?> elements = WasmObjectArray<Object?>(1);
+    elements.write(0, e0);
+    return _GrowableList<T>._withData(elements);
   }
 
   factory _GrowableList._literal2(T e0, T e1) {
-    _List elements = _List(2);
-    elements[0] = e0;
-    elements[1] = e1;
-    final result = new _GrowableList<T>._withData(elements);
-    result._setLength(2);
-    return result;
+    WasmObjectArray<Object?> elements = WasmObjectArray<Object?>(2);
+    elements.write(0, e0);
+    elements.write(1, e1);
+    return _GrowableList<T>._withData(elements);
   }
 
   factory _GrowableList._literal3(T e0, T e1, T e2) {
-    _List elements = _List(3);
-    elements[0] = e0;
-    elements[1] = e1;
-    elements[2] = e2;
-    final result = new _GrowableList<T>._withData(elements);
-    result._setLength(3);
-    return result;
+    WasmObjectArray<Object?> elements = WasmObjectArray<Object?>(3);
+    elements.write(0, e0);
+    elements.write(1, e1);
+    elements.write(2, e2);
+    return _GrowableList<T>._withData(elements);
   }
 
   factory _GrowableList._literal4(T e0, T e1, T e2, T e3) {
-    _List elements = _List(4);
-    elements[0] = e0;
-    elements[1] = e1;
-    elements[2] = e2;
-    elements[3] = e3;
-    final result = new _GrowableList<T>._withData(elements);
-    result._setLength(4);
-    return result;
+    WasmObjectArray<Object?> elements = WasmObjectArray<Object?>(4);
+    elements.write(0, e0);
+    elements.write(1, e1);
+    elements.write(2, e2);
+    elements.write(3, e3);
+    return _GrowableList<T>._withData(elements);
   }
 
   factory _GrowableList._literal5(T e0, T e1, T e2, T e3, T e4) {
-    _List elements = _List(5);
-    elements[0] = e0;
-    elements[1] = e1;
-    elements[2] = e2;
-    elements[3] = e3;
-    elements[4] = e4;
-    final result = new _GrowableList<T>._withData(elements);
-    result._setLength(5);
-    return result;
+    WasmObjectArray<Object?> elements = WasmObjectArray<Object?>(5);
+    elements.write(0, e0);
+    elements.write(1, e1);
+    elements.write(2, e2);
+    elements.write(3, e3);
+    elements.write(4, e4);
+    return _GrowableList<T>._withData(elements);
   }
 
   factory _GrowableList._literal6(T e0, T e1, T e2, T e3, T e4, T e5) {
-    _List elements = _List(6);
-    elements[0] = e0;
-    elements[1] = e1;
-    elements[2] = e2;
-    elements[3] = e3;
-    elements[4] = e4;
-    elements[5] = e5;
-    final result = new _GrowableList<T>._withData(elements);
-    result._setLength(6);
-    return result;
+    WasmObjectArray<Object?> elements = WasmObjectArray<Object?>(6);
+    elements.write(0, e0);
+    elements.write(1, e1);
+    elements.write(2, e2);
+    elements.write(3, e3);
+    elements.write(4, e4);
+    elements.write(5, e5);
+    return _GrowableList<T>._withData(elements);
   }
 
   factory _GrowableList._literal7(T e0, T e1, T e2, T e3, T e4, T e5, T e6) {
-    _List elements = _List(7);
-    elements[0] = e0;
-    elements[1] = e1;
-    elements[2] = e2;
-    elements[3] = e3;
-    elements[4] = e4;
-    elements[5] = e5;
-    elements[6] = e6;
-    final result = new _GrowableList<T>._withData(elements);
-    result._setLength(7);
-    return result;
+    WasmObjectArray<Object?> elements = WasmObjectArray<Object?>(7);
+    elements.write(0, e0);
+    elements.write(1, e1);
+    elements.write(2, e2);
+    elements.write(3, e3);
+    elements.write(4, e4);
+    elements.write(5, e5);
+    elements.write(6, e6);
+    return _GrowableList<T>._withData(elements);
   }
 
   factory _GrowableList._literal8(
       T e0, T e1, T e2, T e3, T e4, T e5, T e6, T e7) {
-    _List elements = _List(8);
-    elements[0] = e0;
-    elements[1] = e1;
-    elements[2] = e2;
-    elements[3] = e3;
-    elements[4] = e4;
-    elements[5] = e5;
-    elements[6] = e6;
-    elements[7] = e7;
-    final result = new _GrowableList<T>._withData(elements);
-    result._setLength(8);
-    return result;
+    WasmObjectArray<Object?> elements = WasmObjectArray<Object?>(8);
+    elements.write(0, e0);
+    elements.write(1, e1);
+    elements.write(2, e2);
+    elements.write(3, e3);
+    elements.write(4, e4);
+    elements.write(5, e5);
+    elements.write(6, e6);
+    elements.write(7, e7);
+    return _GrowableList<T>._withData(elements);
   }
 }

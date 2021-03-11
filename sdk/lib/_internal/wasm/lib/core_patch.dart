@@ -11,7 +11,7 @@ import "dart:_internal"
         CodeUnits,
         copyRangeFromUint8ListToOneByteString,
         EfficientLengthIterable,
-        FixedLengthListBase,
+        FixedLengthListMixin,
         IterableElementError,
         ListIterator,
         Lists,
@@ -23,6 +23,7 @@ import "dart:_internal"
         makeListFixedLength,
         patch,
         unsafeCast,
+        WasmObjectArray,
         writeIntoOneByteString,
         writeIntoTwoByteString;
 

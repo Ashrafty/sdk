@@ -163,7 +163,8 @@
         "uri": "internal/internal.dart",
         "patches": [
           "_internal/wasm/lib/internal_patch.dart",
-          "_internal/wasm/lib/patch.dart"
+          "_internal/wasm/lib/patch.dart",
+          "_internal/wasm/lib/wasm_types.dart"
         ]
       },
       "async": {
@@ -189,6 +190,7 @@
         "patches": [
           "_internal/wasm/lib/core_patch.dart",
           "_internal/wasm/lib/array.dart",
+          "_internal/wasm/lib/array_patch.dart",
           "_internal/wasm/lib/expando_patch.dart",
           "_internal/wasm/lib/growable_array.dart",
           "_internal/wasm/lib/immutable_map.dart",

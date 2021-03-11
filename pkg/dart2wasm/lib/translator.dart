@@ -38,6 +38,10 @@ class Translator {
   ClosedWorldClassHierarchy hierarchy;
   late ClassHierarchySubtypes subtypes;
 
+  late final Class wasmTypesBaseClass;
+  late final Class wasmArrayBaseClass;
+  late final Map<Class, w.StorageType> builtinWasmTypes;
+
   late DispatchTable dispatchTable;
 
   List<ClassInfo> classes = [];
@@ -59,6 +63,26 @@ class Translator {
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
     subtypes = hierarchy.computeSubtypesInformation();
     dispatchTable = DispatchTable(this);
+
+    Library internalLibrary =
+        component.libraries.firstWhere((l) => l.name == "dart._internal");
+    Class lookup(String name) {
+      return internalLibrary.classes.firstWhere((c) => c.name == name);
+    }
+
+    wasmTypesBaseClass = lookup("_WasmBase");
+    wasmArrayBaseClass = lookup("_WasmArray");
+    builtinWasmTypes = {
+      coreTypes.boolClass: w.NumType.i32,
+      coreTypes.intClass: w.NumType.i64,
+      coreTypes.doubleClass: w.NumType.f64,
+      lookup("WasmI8"): w.PackedType.i8,
+      lookup("WasmI16"): w.PackedType.i16,
+      lookup("WasmI32"): w.NumType.i32,
+      lookup("WasmI64"): w.NumType.i64,
+      lookup("WasmF32"): w.NumType.f32,
+      lookup("WasmF64"): w.NumType.f64,
+    };
   }
 
   w.Module translate() {
@@ -136,42 +160,43 @@ class Translator {
   }
 
   w.ValueType translateType(DartType type) {
+    w.StorageType wasmType = translateStorageType(type);
+    if (wasmType is w.ValueType) return wasmType;
+    throw "Non-value types only allowed in arrays and fields";
+  }
+
+  bool _isWasmType(InterfaceType type) {
+    return type.classNode.superclass?.superclass == wasmTypesBaseClass;
+  }
+
+  w.StorageType translateStorageType(DartType type) {
     assert(type is! VoidType);
     if (type is InterfaceType) {
-      if (type.classNode == coreTypes.intClass) {
-        if (!type.isPotentiallyNullable) {
-          return w.NumType.i64;
-        }
+      if (!type.isPotentiallyNullable) {
+        w.StorageType? builtin = builtinWasmTypes[type.classNode];
+        if (builtin != null) return builtin;
+      } else if (_isWasmType(type)) {
+        throw "Wasm numeric types can't be nullable";
       }
-      if (type.classNode == coreTypes.doubleClass) {
-        if (!type.isPotentiallyNullable) {
-          return w.NumType.f64;
-        }
-      }
-      if (type.classNode == coreTypes.boolClass) {
-        if (!type.isPotentiallyNullable) {
-          return w.NumType.i32;
-        }
-      }
-      if (type.classNode == coreTypes.listClass) {
-        DartType typeArg = type.typeArguments.single;
-        return w.RefType.def(arrayType(typeArg), nullable: true);
+      if (type.classNode.superclass == wasmArrayBaseClass) {
+        DartType elementType = type.typeArguments.single;
+        return w.RefType.def(arrayType(elementType), nullable: false);
       }
       return w.RefType.def(classInfo[type.classNode]!.repr.struct,
           nullable:
               !options.parameterNullability || type.isPotentiallyNullable);
     }
     if (type is DynamicType) {
-      return translateType(coreTypes.objectNullableRawType);
+      return translateStorageType(coreTypes.objectNullableRawType);
     }
     if (type is VoidType) {
       return voidMarker;
     }
     if (type is TypeParameterType) {
-      return translateType(type.bound);
+      return translateStorageType(type.bound);
     }
     if (type is FutureOrType) {
-      return translateType(coreTypes.objectNullableRawType);
+      return translateStorageType(coreTypes.objectNullableRawType);
     }
     if (type is FunctionType) {
       // TODO
@@ -181,10 +206,11 @@ class Translator {
   }
 
   w.ArrayType arrayType(DartType type) {
+    while (type is TypeParameterType) type = type.bound;
     return arrayTypeCache.putIfAbsent(
         type,
-        () => m.addArrayType("List<${type.toText(defaultAstTextStrategy)}>")
-          ..elementType = w.FieldType(translateType(type)));
+        () => m.addArrayType("Array<${type.toText(defaultAstTextStrategy)}>")
+          ..elementType = w.FieldType(translateStorageType(type)));
   }
 
   w.ValueType typeForLocal(w.ValueType type) {

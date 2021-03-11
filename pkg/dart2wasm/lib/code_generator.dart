@@ -54,14 +54,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       {List<w.Local>? inlinedLocals, w.Label? returnLabel}) {
     Member member = reference.asMember;
     b = function.body;
-    if (member.isExternal) {
-      // TODO: This just works for identical and Object.==
-      assert(function.type.outputs.length == 1 &&
-          function.type.outputs.single == w.NumType.i32);
-      b.i32_const(0);
-      b.end();
-      return;
-    }
+    assert(!member.isExternal);
 
     this.member = member;
     this.function = function;
