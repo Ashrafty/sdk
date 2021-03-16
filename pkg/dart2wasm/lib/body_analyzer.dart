@@ -233,6 +233,9 @@ class BodyAnalyzer extends Visitor<w.ValueType>
           struct.fields[translator.fieldIndex[singleTarget]!].type.unpacked;
     } else {
       // Instance call of getter
+      w.ValueType? intrinsicResult =
+          intrinsifier.getInstanceGetterIntrinsic(node);
+      if (intrinsicResult != null) return intrinsicResult;
       int selectorId = translator.tableSelectorAssigner
           .getterSelectorId(node.interfaceTarget);
       w.FunctionType signature =

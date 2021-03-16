@@ -102,10 +102,29 @@ class Intrinsifier {
     };
   }
 
-  w.ValueType? getInstanceIntrinsic(InstanceInvocation invocation) {
-    DartType receiverType = dartTypeOf(invocation.receiver);
-    String name = invocation.name.name;
-    if (invocation.interfaceTarget.enclosingClass?.superclass ==
+  w.ValueType? getInstanceGetterIntrinsic(InstanceGet node) {
+    DartType receiverType = dartTypeOf(node.receiver);
+    String name = node.name.name;
+    if (node.interfaceTarget.enclosingClass == translator.wasmArrayBaseClass) {
+      assert(name == 'length');
+      DartType elementType =
+          (receiverType as InterfaceType).typeArguments.single;
+      w.ArrayType arrayType = translator.arrayType(elementType);
+      Expression array = node.receiver;
+      bodyAnalyzer.wrapExpression(array, bodyAnalyzer.typeOfExp(array));
+      bodyAnalyzer.inject[node] = (c) {
+        c.wrap(array);
+        c.b.array_len(arrayType);
+        c.b.i64_extend_i32_u();
+      };
+      return w.NumType.i64;
+    }
+  }
+
+  w.ValueType? getInstanceIntrinsic(InstanceInvocation node) {
+    DartType receiverType = dartTypeOf(node.receiver);
+    String name = node.name.name;
+    if (node.interfaceTarget.enclosingClass?.superclass ==
         translator.wasmArrayBaseClass) {
       DartType elementType =
           (receiverType as InterfaceType).typeArguments.single;
@@ -120,12 +139,12 @@ class Intrinsifier {
         case 'readSigned':
         case 'readUnsigned':
           bool unsigned = name == 'readUnsigned';
-          Expression array = invocation.receiver;
-          Expression index = invocation.arguments.positional.single;
+          Expression array = node.receiver;
+          Expression index = node.arguments.positional.single;
           bodyAnalyzer.wrapExpression(
               array, w.RefType.def(arrayType, nullable: true));
           bodyAnalyzer.wrapExpression(index, w.NumType.i64);
-          bodyAnalyzer.inject[invocation] = (c) {
+          bodyAnalyzer.inject[node] = (c) {
             c.wrap(array);
             c.wrap(index);
             c.b.i32_wrap_i64();
@@ -152,15 +171,15 @@ class Intrinsifier {
           };
           return bodyAnalyzer.translateType(elementType);
         case 'write':
-          Expression array = invocation.receiver;
-          Expression index = invocation.arguments.positional[0];
-          Expression value = invocation.arguments.positional[1];
+          Expression array = node.receiver;
+          Expression index = node.arguments.positional[0];
+          Expression value = node.arguments.positional[1];
           bodyAnalyzer.wrapExpression(
               array, w.RefType.def(arrayType, nullable: true));
           bodyAnalyzer.wrapExpression(index, w.NumType.i64);
           bodyAnalyzer.wrapExpression(
               value, bodyAnalyzer.translateType(elementType));
-          bodyAnalyzer.inject[invocation] = (c) {
+          bodyAnalyzer.inject[node] = (c) {
             c.wrap(array);
             c.wrap(index);
             c.b.i32_wrap_i64();
@@ -180,10 +199,10 @@ class Intrinsifier {
       }
     }
 
-    if (invocation.arguments.positional.length == 1) {
+    if (node.arguments.positional.length == 1) {
       // Binary operator
-      Expression left = invocation.receiver;
-      Expression right = invocation.arguments.positional.single;
+      Expression left = node.receiver;
+      Expression right = node.arguments.positional.single;
       DartType argType = dartTypeOf(right);
       var op = binaryOperatorMap[receiverType]?[name]?[argType];
       if (op != null) {
@@ -192,22 +211,22 @@ class Intrinsifier {
         w.ValueType outType = isComparison(name) ? w.NumType.i32 : inType;
         bodyAnalyzer.wrapExpression(left, inType);
         bodyAnalyzer.wrapExpression(right, inType);
-        bodyAnalyzer.inject[invocation] = (c) {
+        bodyAnalyzer.inject[node] = (c) {
           c.wrap(left);
           c.wrap(right);
           op(c);
         };
         return outType;
       }
-    } else if (invocation.arguments.positional.length == 0) {
+    } else if (node.arguments.positional.length == 0) {
       // Unary operator
-      Expression operand = invocation.receiver;
+      Expression operand = node.receiver;
       var op = unaryOperatorMap[receiverType]?[name];
       if (op != null) {
         w.ValueType wasmType = translator.translateType(receiverType);
         bodyAnalyzer.wrapExpression(operand, wasmType);
-        bodyAnalyzer.inject[invocation] = (c) {
-          c.wrap(invocation.receiver);
+        bodyAnalyzer.inject[node] = (c) {
+          c.wrap(node.receiver);
           op(c);
         };
         return wasmType;
