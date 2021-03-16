@@ -478,17 +478,11 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     wrap(node.left);
     wrap(node.right);
     b.ref_eq();
-    if (node.isNot) {
-      b.i32_eqz();
-    }
   }
 
   void visitEqualsNull(EqualsNull node) {
     wrap(node.expression);
     b.ref_is_null();
-    if (node.isNot) {
-      b.i32_eqz();
-    }
   }
 
   void _virtualCall(Member interfaceTarget, void pushArguments(),

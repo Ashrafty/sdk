@@ -224,11 +224,7 @@ class Intrinsifier {
       bodyAnalyzer.inject[node] = (c) {
         c.wrap(node.left);
         c.wrap(node.right);
-        if (node.isNot) {
-          c.b.i64_ne();
-        } else {
-          c.b.i64_eq();
-        }
+        c.b.i64_eq();
       };
       return w.NumType.i32;
     }
@@ -239,11 +235,7 @@ class Intrinsifier {
       bodyAnalyzer.inject[node] = (c) {
         c.wrap(node.left);
         c.wrap(node.right);
-        if (node.isNot) {
-          c.b.f64_ne();
-        } else {
-          c.b.f64_eq();
-        }
+        c.b.f64_eq();
       };
       return w.NumType.i32;
     }
