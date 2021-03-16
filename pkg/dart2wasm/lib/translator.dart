@@ -5,6 +5,7 @@
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
 import 'package:dart2wasm/dispatch_table.dart';
+import 'package:dart2wasm/globals.dart';
 import 'package:dart2wasm/functions.dart';
 
 import 'package:kernel/ast.dart';
@@ -42,7 +43,8 @@ class Translator {
   late final Class wasmArrayBaseClass;
   late final Map<Class, w.StorageType> builtinWasmTypes;
 
-  late DispatchTable dispatchTable;
+  late final DispatchTable dispatchTable;
+  late final Globals globals;
 
   List<ClassInfo> classes = [];
   Map<Class, ClassInfo> classInfo = {};
@@ -90,6 +92,7 @@ class Translator {
     voidMarker = w.RefType.def(w.StructType("void"), nullable: true);
 
     ClassInfoCollector(this).collect();
+    globals = Globals(this);
 
     w.FunctionType printType = m.addFunctionType([w.NumType.i64], []);
     w.ImportedFunction printFun = m.importFunction("console", "log", printType);
@@ -215,6 +218,10 @@ class Translator {
 
   w.ValueType typeForLocal(w.ValueType type) {
     return options.localNullability ? type : type.withNullability(true);
+  }
+
+  w.ValueType outputOrVoid(List<w.ValueType> outputs) {
+    return outputs.isEmpty ? voidMarker : outputs.single;
   }
 
   Member? singleTarget(Member interfaceTarget, DartType receiverType,

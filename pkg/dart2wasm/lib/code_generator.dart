@@ -61,8 +61,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     typeContext = StaticTypeContext(member, translator.typeEnvironment);
     paramLocals = inlinedLocals ?? function.locals;
     this.returnLabel = returnLabel;
-    returnType =
-        outputOrVoid(returnLabel?.targetTypes ?? function.type.outputs);
+    returnType = translator
+        .outputOrVoid(returnLabel?.targetTypes ?? function.type.outputs);
 
     if (member is Field) {
       // Implicit getter or setter
@@ -151,10 +151,6 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
-  w.ValueType outputOrVoid(List<w.ValueType> outputs) {
-    return outputs.isEmpty ? voidMarker : outputs.single;
-  }
-
   CodeGenCallback? convertTypeCallback(
       w.ValueType from, w.ValueType to, CodeGenCallback sub) {
     if (from == voidMarker || to == voidMarker) {
@@ -234,8 +230,11 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void _call(Reference target) {
-    assert(target is! Field);
-    w.BaseFunction targetFunction = translator.functions[target]!;
+    assert(target.asMember is! Field);
+    w.BaseFunction? targetFunction = translator.functions[target];
+    if (targetFunction == null) {
+      throw "No implementation for function ${target.asMember}";
+    }
     if (translator.shouldInline(target)) {
       List<w.Local> inlinedLocals = targetFunction.type.inputs
           .map((t) => function.addLocal(typeForLocal(t)))
@@ -589,6 +588,40 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       b.local_tee(local);
     } else {
       b.local_set(local);
+    }
+  }
+
+  @override
+  void visitStaticGet(StaticGet node) {
+    Member target = node.target;
+    if (target is Field) {
+      w.Global global = translator.globals.getGlobal(target);
+      b.global_get(global);
+    } else {
+      _call(target.reference);
+    }
+  }
+
+  @override
+  void visitStaticSet(StaticSet node) {
+    bool preserved = bodyAnalyzer.preserved.contains(node);
+    w.Local? temp = preserved
+        ? function
+            .addLocal(translateType(node.value.getStaticType(typeContext)))
+        : null;
+    wrap(node.value);
+    if (preserved) {
+      b.local_tee(temp!);
+    }
+    Member target = node.target;
+    if (target is Field) {
+      w.Global global = translator.globals.getGlobal(target);
+      b.global_set(global);
+    } else {
+      _call(target.reference);
+    }
+    if (preserved) {
+      b.local_get(temp!);
     }
   }
 

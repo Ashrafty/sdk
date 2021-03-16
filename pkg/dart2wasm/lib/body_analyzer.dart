@@ -159,6 +159,8 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitVariableGet(VariableGet node) {
+    return typeForLocal(translateType(node.variable.type));
+    // TODO: Create and set promoted local to be able to use promoted type.
     DartType? promotedDartType = node.promotedType;
     if (promotedDartType != null) {
       w.ValueType promotedType = translateType(promotedDartType);
@@ -168,7 +170,6 @@ class BodyAnalyzer extends Visitor<w.ValueType>
         return promotedType;
       }
     }
-    return typeForLocal(translateType(node.variable.type));
   }
 
   w.ValueType visitVariableSet(VariableSet node) {
@@ -178,6 +179,41 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     if (expectedType != voidMarker) {
       preserved.add(node);
       return localType;
+    }
+    return voidMarker;
+  }
+
+  w.ValueType visitStaticGet(StaticGet node) {
+    Member target = node.target;
+    assert(!target.isInstanceMember);
+    if (target is Field) {
+      w.Global global = translator.globals.getGlobal(target);
+      return global.type.type;
+    } else {
+      assert(target is Procedure && target.isGetter);
+      w.FunctionType ftype = translator.functions[target.reference]!.type;
+      return translator.outputOrVoid(ftype.outputs);
+    }
+  }
+
+  w.ValueType visitStaticSet(StaticSet node) {
+    w.ValueType expectedType = this.expectedType;
+    Member target = node.target;
+    assert(!target.isInstanceMember);
+    w.ValueType valueType;
+    if (target is Field) {
+      w.Global global = translator.globals.getGlobal(target);
+      valueType = global.type.type;
+    } else {
+      assert(target is Procedure && target.isSetter);
+      w.FunctionType ftype = translator.functions[target.reference]!.type;
+      assert(ftype.outputs.isEmpty);
+      valueType = ftype.inputs.single;
+    }
+    wrapExpression(node.value, valueType);
+    if (expectedType != voidMarker) {
+      preserved.add(node);
+      return typeForLocal(valueType);
     }
     return voidMarker;
   }
@@ -248,7 +284,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
       wrapExpression(
           arguments.positional[i], signature.inputs[signatureOffset + i]);
     }
-    return codeGen.outputOrVoid(signature.outputs);
+    return translator.outputOrVoid(signature.outputs);
   }
 
   w.ValueType _visitThis(w.ValueType expectedType) {
