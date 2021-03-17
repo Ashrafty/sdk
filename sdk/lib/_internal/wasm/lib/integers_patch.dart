@@ -64,7 +64,8 @@ class int {
     return _parse(unsafeCast<_StringBase>(source), radix, onError);
   }
 
-  static int _parse(_StringBase source, int? radix, onError) {
+  static int _parse(
+      _StringBase source, int? radix, int onError(String source)?) {
     int end = source._lastNonWhitespace() + 1;
     if (end == 0) {
       return _throwFormatException(onError, source, source.length, radix, null);
@@ -113,15 +114,14 @@ class int {
       throw new RangeError("Radix $radix not in range 2..36");
     }
     try {
-      return _parse(unsafeCast<_StringBase>(source), radix, _kNull);
+      return _parse(unsafeCast<_StringBase>(source), radix, (_) => 0);
     } catch (e) {
       return null;
     }
   }
 
-  static Null _kNull(_) => null;
-
-  static int _throwFormatException(onError, source, index, radix, message) {
+  static int _throwFormatException(int onError(String source)?, String source,
+      int? index, int? radix, String? message) {
     if (onError != null) return onError(source);
     if (message != null) {
       throw new FormatException(message, source, index);
