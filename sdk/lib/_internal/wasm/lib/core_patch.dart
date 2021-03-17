@@ -42,24 +42,3 @@ import "dart:collection"
 
 import "dart:typed_data"
     show Endian, Uint8List, Int64List, Uint16List, Uint32List;
-
-@patch
-@pragma("wasm:entry-point")
-class bool {
-  // A boxed bool contains an unboxed bool.
-  bool value = false;
-}
-
-@patch
-@pragma("wasm:entry-point")
-class int {
-  // A boxed int contains an unboxed int.
-  int value = 0;
-}
-
-@patch
-@pragma("wasm:entry-point")
-class double {
-  // A boxed double contains an unboxed double.
-  double value = 0.0;
-}

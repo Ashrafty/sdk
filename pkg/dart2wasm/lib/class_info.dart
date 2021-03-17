@@ -54,14 +54,6 @@ class ClassInfoCollector {
   ClassInfoCollector(this.translator) : m = translator.m;
 
   void initialize(Class cls) {
-    bool isEntryPointAnnotation(Expression a) {
-      var constant = (a as ConstantExpression).constant as InstanceConstant;
-      return constant.classNode == translator.coreTypes.pragmaClass &&
-          constant.fieldValues[
-                  translator.coreTypes.pragmaName.getterReference] ==
-              StringConstant("wasm:entry-point");
-    }
-
     ClassInfo? info = translator.classInfo[cls];
     if (info == null) {
       Class? superclass = cls.superclass;
@@ -81,9 +73,8 @@ class ClassInfoCollector {
         }
         ClassInfo superInfo = translator.classInfo[superclass]!;
         final int depth = superInfo.depth + 1;
-        final bool builtin = cls.annotations.any(isEntryPointAnnotation);
         w.StructType struct =
-            !builtin && cls.fields.where((f) => f.isInstanceMember).isEmpty
+            cls.fields.where((f) => f.isInstanceMember).isEmpty
                 ? superInfo.struct
                 : m.addStructType(cls.name);
         final w.DefinedGlobal rtt =
@@ -137,13 +128,6 @@ class ClassInfoCollector {
       }
     }
 
-    translator.classForPrimitive[w.NumType.i32] =
-        translator.classInfo[translator.coreTypes.boolClass]!;
-    translator.classForPrimitive[w.NumType.i64] =
-        translator.classInfo[translator.coreTypes.intClass]!;
-    translator.classForPrimitive[w.NumType.f64] =
-        translator.classInfo[translator.coreTypes.doubleClass]!;
-
     for (ClassInfo info in translator.classes) {
       computeRepresentation(info);
     }
@@ -151,9 +135,5 @@ class ClassInfoCollector {
     for (ClassInfo info in translator.classes) {
       generateFields(info);
     }
-
-    translator.classForPrimitive.forEach((wasmType, info) {
-      info.struct.fields.add(w.FieldType(wasmType));
-    });
   }
 }

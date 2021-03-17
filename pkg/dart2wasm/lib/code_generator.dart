@@ -175,7 +175,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (!from.isSubtypeOf(to)) {
       if (from is! w.RefType && to is w.RefType) {
         // Boxing
-        ClassInfo info = translator.classForPrimitive[from]!;
+        ClassInfo info = translator.classInfo[translator.boxedClasses[from]!]!;
         assert(w.HeapType.def(info.struct).isSubtypeOf(to.heapType));
         return (c) {
           c.b.i32_const(info.classId);
@@ -185,7 +185,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
         };
       } else if (from is w.RefType && to is! w.RefType) {
         // Unboxing
-        ClassInfo info = translator.classForPrimitive[to]!;
+        ClassInfo info = translator.classInfo[translator.boxedClasses[to]!]!;
         bool needsCast =
             !from.heapType.isSubtypeOf(w.HeapType.def(info.struct));
         return (c) {
@@ -755,6 +755,30 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.i32_const(info.classId);
     b.global_get(info.rtt);
     b.struct_new_with_rtt(info.struct);
+  }
+
+  void visitIsExpression(IsExpression node) {
+    DartType type = node.type;
+    if (type is! InterfaceType) throw "Unsupported type in 'is' check: $type";
+    Class? singular = null;
+    for (Class subclass in translator.subtypes.getSubtypesOf(type.classNode)) {
+      if (!subclass.isAbstract) {
+        if (singular != null) {
+          throw "Only supports 'is' check with singular concrete subclass";
+        }
+        singular = subclass;
+      }
+    }
+    wrap(node.operand);
+    if (singular == null) {
+      b.drop();
+      b.i32_const(0);
+      return;
+    }
+    ClassInfo info = translator.classInfo[singular]!;
+    b.struct_get(object.struct, 0);
+    b.i32_const(info.classId);
+    b.i32_eq();
   }
 
   void visitAsExpression(AsExpression node) {

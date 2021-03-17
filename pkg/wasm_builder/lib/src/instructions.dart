@@ -143,22 +143,16 @@ class Instructions with SerializerMixin {
   }
 
   bool _verifyTypes(List<ValueType> inputs, List<ValueType> outputs,
-      {bool allowUnreachable = false,
-      List<Object>? trace,
-      bool reachableAfter = true}) {
+      {List<Object>? trace, bool reachableAfter = true}) {
     return _verifyTypesFun(inputs, (_) => outputs,
-        allowUnreachable: allowUnreachable,
-        trace: trace,
-        reachableAfter: reachableAfter);
+        trace: trace, reachableAfter: reachableAfter);
   }
 
   bool _verifyTypesFun(List<ValueType> inputs,
       List<ValueType> Function(List<ValueType>) outputsFun,
-      {bool allowUnreachable = false,
-      List<Object>? trace,
-      bool reachableAfter = true}) {
-    if (!reachable && !allowUnreachable) {
-      _reportError("Unreachable instruction");
+      {List<Object>? trace, bool reachableAfter = true}) {
+    if (!reachable) {
+      return true;
     }
     if (_stackTypes.length - inputs.length < labelStack.last.baseStackHeight) {
       _reportError("Underflowing base stack of innermost block");
@@ -223,7 +217,7 @@ class Instructions with SerializerMixin {
 
   void unreachable() {
     assert(_verifyTypes(const [], const [],
-        allowUnreachable: true, trace: const ['nop'], reachableAfter: false));
+        trace: const ['unreachable'], reachableAfter: false));
     reachable = false;
     writeByte(0x00);
   }

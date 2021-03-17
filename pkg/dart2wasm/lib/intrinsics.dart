@@ -13,13 +13,14 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class Intrinsifier {
   final BodyAnalyzer bodyAnalyzer;
-  final DartType intType;
-  final DartType doubleType;
+  final w.ValueType intType;
+  final w.ValueType doubleType;
 
-  late final Map<DartType, Map<String, Map<DartType, CodeGenCallback>>>
+  late final Map<w.ValueType, Map<String, Map<w.ValueType, CodeGenCallback>>>
       binaryOperatorMap;
-  late final Map<DartType, Map<String, CodeGenCallback>> unaryOperatorMap;
-  late final Map<DartType, Map<DartType, Map<bool, CodeGenCallback>>> equalsMap;
+  late final Map<w.ValueType, Map<String, CodeGenCallback>> unaryOperatorMap;
+  late final Map<w.ValueType, Map<w.ValueType, Map<bool, CodeGenCallback>>>
+      equalsMap;
 
   // Meaning of the `isNot` field of `EqualsCall`
   static const bool isEquals = false;
@@ -35,10 +36,8 @@ class Intrinsifier {
       op == '<' || op == '<=' || op == '>' || op == '>=';
 
   Intrinsifier(this.bodyAnalyzer)
-      : intType = bodyAnalyzer.translator.coreTypes
-            .intRawType(Nullability.nonNullable),
-        doubleType = bodyAnalyzer.translator.coreTypes
-            .doubleRawType(Nullability.nonNullable) {
+      : intType = w.NumType.i64,
+        doubleType = w.NumType.f64 {
     binaryOperatorMap = {
       intType: {
         '+': {intType: (c) => c.b.i64_add()},
@@ -199,44 +198,47 @@ class Intrinsifier {
       }
     }
 
-    if (node.arguments.positional.length == 1) {
-      // Binary operator
-      Expression left = node.receiver;
-      Expression right = node.arguments.positional.single;
-      DartType argType = dartTypeOf(right);
-      var op = binaryOperatorMap[receiverType]?[name]?[argType];
-      if (op != null) {
-        // TODO: Support differing operand types
-        w.ValueType inType = translator.translateType(receiverType);
-        w.ValueType outType = isComparison(name) ? w.NumType.i32 : inType;
-        bodyAnalyzer.wrapExpression(left, inType);
-        bodyAnalyzer.wrapExpression(right, inType);
-        bodyAnalyzer.inject[node] = (c) {
-          c.wrap(left);
-          c.wrap(right);
-          op(c);
-        };
-        return outType;
-      }
-    } else if (node.arguments.positional.length == 0) {
-      // Unary operator
-      Expression operand = node.receiver;
-      var op = unaryOperatorMap[receiverType]?[name];
-      if (op != null) {
-        w.ValueType wasmType = translator.translateType(receiverType);
-        bodyAnalyzer.wrapExpression(operand, wasmType);
-        bodyAnalyzer.inject[node] = (c) {
-          c.wrap(node.receiver);
-          op(c);
-        };
-        return wasmType;
+    if (node.interfaceTarget.kind == ProcedureKind.Operator) {
+      if (node.arguments.positional.length == 1) {
+        // Binary operator
+        Expression left = node.receiver;
+        Expression right = node.arguments.positional.single;
+        DartType argType = dartTypeOf(right);
+        w.ValueType leftType = translator.translateType(receiverType);
+        w.ValueType rightType = translator.translateType(argType);
+        var op = binaryOperatorMap[leftType]?[name]?[rightType];
+        if (op != null) {
+          // TODO: Support differing operand types
+          w.ValueType outType = isComparison(name) ? w.NumType.i32 : leftType;
+          bodyAnalyzer.wrapExpression(left, leftType);
+          bodyAnalyzer.wrapExpression(right, rightType);
+          bodyAnalyzer.inject[node] = (c) {
+            c.wrap(left);
+            c.wrap(right);
+            op(c);
+          };
+          return outType;
+        }
+      } else if (node.arguments.positional.length == 0) {
+        // Unary operator
+        Expression operand = node.receiver;
+        w.ValueType opType = translator.translateType(receiverType);
+        var op = unaryOperatorMap[opType]?[name];
+        if (op != null) {
+          bodyAnalyzer.wrapExpression(operand, opType);
+          bodyAnalyzer.inject[node] = (c) {
+            c.wrap(node.receiver);
+            op(c);
+          };
+          return opType;
+        }
       }
     }
   }
 
   w.ValueType? getEqualsIntrinsic(EqualsCall node) {
-    DartType leftType = dartTypeOf(node.left);
-    DartType rightType = dartTypeOf(node.right);
+    w.ValueType leftType = translator.translateType(dartTypeOf(node.left));
+    w.ValueType rightType = translator.translateType(dartTypeOf(node.right));
     if (leftType == intType && rightType == intType) {
       bodyAnalyzer.wrapExpression(node.left, w.NumType.i64);
       bodyAnalyzer.wrapExpression(node.right, w.NumType.i64);

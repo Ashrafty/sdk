@@ -30,10 +30,11 @@ import 'package:dart2wasm/translator.dart';
 ///   Intrinsifier).
 class BodyAnalyzer extends Visitor<w.ValueType>
     with VisitorThrowingMixin<w.ValueType> {
-  CodeGenerator codeGen;
-  Translator translator;
-  late Intrinsifier intrinsifier;
-  w.ValueType voidMarker;
+  final CodeGenerator codeGen;
+  final Translator translator;
+  late final Intrinsifier intrinsifier;
+  final w.ValueType voidMarker;
+  final objectType;
 
   Set<Expression> preserved = {};
   Map<Expression, CodeGenCallback> inject = {};
@@ -45,6 +46,8 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   BodyAnalyzer(this.codeGen)
       : translator = codeGen.translator,
         voidMarker = codeGen.voidMarker,
+        objectType = codeGen.translator
+            .translateType(codeGen.translator.coreTypes.objectNullableRawType),
         expectedType = codeGen.translator.voidMarker {
     intrinsifier = Intrinsifier(this);
   }
@@ -320,8 +323,6 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   w.ValueType visitEqualsCall(EqualsCall node) {
     w.ValueType? intrinsicResult = intrinsifier.getEqualsIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
-    w.ValueType objectType =
-        translateType(translator.coreTypes.objectNullableRawType);
     wrapExpression(node.left, objectType);
     wrapExpression(node.right, objectType);
     return w.NumType.i32;
@@ -381,7 +382,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitIsExpression(IsExpression node) {
-    wrapExpression(node.operand, typeOfExp(node.operand));
+    wrapExpression(node.operand, objectType);
     return w.NumType.i32;
   }
 
@@ -435,8 +436,6 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitStringConcatenation(StringConcatenation node) {
-    w.ValueType objectType =
-        translateType(translator.coreTypes.objectNullableRawType);
     for (Expression expression in node.expressions) {
       wrapExpression(expression, objectType);
     }
