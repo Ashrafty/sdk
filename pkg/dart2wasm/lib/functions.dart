@@ -5,31 +5,37 @@
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
+import 'package:kernel/external_name.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class FunctionCollector extends MemberVisitor<void> {
   Translator translator;
   w.Module m;
+  bool importPass = false;
 
   FunctionCollector(this.translator) : m = translator.m;
 
   void collect() {
-    for (Library library in translator.libraries) {
-      for (Member member in library.members) {
-        member.accept(this);
-      }
-      for (Class cls in library.classes) {
-        for (Member member in cls.members) {
+    do {
+      importPass = !importPass;
+      for (Library library in translator.libraries) {
+        for (Member member in library.members) {
           member.accept(this);
         }
+        for (Class cls in library.classes) {
+          for (Member member in cls.members) {
+            member.accept(this);
+          }
+        }
       }
-    }
+    } while (importPass);
   }
 
   void defaultMember(Member node) {}
 
   void visitField(Field node) {
+    if (importPass) return;
     if (node.isInstanceMember) {
       translator.functions[node.getterReference] = m.addFunction(translator
           .dispatchTable
@@ -45,6 +51,23 @@ class FunctionCollector extends MemberVisitor<void> {
   }
 
   void visitProcedure(Procedure node) {
+    if (importPass) {
+      String? externalName = getExternalName(node);
+      if (externalName != null) {
+        int dot = externalName.indexOf('.');
+        if (dot != -1) {
+          assert(!node.isInstanceMember);
+          String module = externalName.substring(0, dot);
+          String name = externalName.substring(dot + 1);
+          w.FunctionType ftype = _makeFunctionType(
+              node.reference, node.function!.returnType, null,
+              getter: node.isGetter);
+          translator.functions[node.reference] =
+              m.importFunction(module, name, ftype);
+        }
+      }
+      return;
+    }
     if (!node.isAbstract && !node.isExternal) {
       if (node.isInstanceMember) {
         translator.functions[node.reference] = m.addFunction(translator
@@ -59,6 +82,7 @@ class FunctionCollector extends MemberVisitor<void> {
   }
 
   void visitConstructor(Constructor node) {
+    if (importPass) return;
     _makeFunction(node.reference, VoidType(),
         InterfaceType(node.enclosingClass, Nullability.nonNullable),
         getter: false);
@@ -69,6 +93,14 @@ class FunctionCollector extends MemberVisitor<void> {
       {required bool getter}) {
     if (translator.functions.containsKey(target)) return;
 
+    w.FunctionType ftype =
+        _makeFunctionType(target, returnType, receiverType, getter: getter);
+    translator.functions[target] = m.addFunction(ftype);
+  }
+
+  w.FunctionType _makeFunctionType(
+      Reference target, DartType returnType, DartType? receiverType,
+      {required bool getter}) {
     Member member = target.asMember;
     Iterable<DartType> params;
     if (member is Field) {
@@ -91,7 +123,6 @@ class FunctionCollector extends MemberVisitor<void> {
         ? const []
         : [translator.translateType(returnType)];
 
-    w.FunctionType functionType = m.addFunctionType(inputs, outputs);
-    translator.functions[target] = m.addFunction(functionType);
+    return m.addFunctionType(inputs, outputs);
   }
 }

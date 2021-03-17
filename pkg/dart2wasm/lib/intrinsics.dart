@@ -19,6 +19,7 @@ class Intrinsifier {
   late final Map<w.ValueType, Map<String, Map<w.ValueType, CodeGenCallback>>>
       binaryOperatorMap;
   late final Map<w.ValueType, Map<String, CodeGenCallback>> unaryOperatorMap;
+  late final Map<String, w.ValueType> unaryResultMap;
   late final Map<w.ValueType, Map<w.ValueType, Map<bool, CodeGenCallback>>>
       equalsMap;
 
@@ -77,12 +78,23 @@ class Intrinsifier {
           c.b.i64_const(-1);
           c.b.i64_xor();
         },
+        'toDouble': (c) {
+          c.b.f64_convert_i64_s();
+        },
       },
       doubleType: {
         'unary-': (c) {
           c.b.f64_neg();
         },
+        'toInt': (c) {
+          c.b.i64_trunc_sat_f64_s();
+        }
       },
+    };
+
+    unaryResultMap = {
+      'toDouble': w.NumType.f64,
+      'toInt': w.NumType.i64,
     };
 
     equalsMap = {
@@ -198,40 +210,38 @@ class Intrinsifier {
       }
     }
 
-    if (node.interfaceTarget.kind == ProcedureKind.Operator) {
-      if (node.arguments.positional.length == 1) {
-        // Binary operator
-        Expression left = node.receiver;
-        Expression right = node.arguments.positional.single;
-        DartType argType = dartTypeOf(right);
-        w.ValueType leftType = translator.translateType(receiverType);
-        w.ValueType rightType = translator.translateType(argType);
-        var op = binaryOperatorMap[leftType]?[name]?[rightType];
-        if (op != null) {
-          // TODO: Support differing operand types
-          w.ValueType outType = isComparison(name) ? w.NumType.i32 : leftType;
-          bodyAnalyzer.wrapExpression(left, leftType);
-          bodyAnalyzer.wrapExpression(right, rightType);
-          bodyAnalyzer.inject[node] = (c) {
-            c.wrap(left);
-            c.wrap(right);
-            op(c);
-          };
-          return outType;
-        }
-      } else if (node.arguments.positional.length == 0) {
-        // Unary operator
-        Expression operand = node.receiver;
-        w.ValueType opType = translator.translateType(receiverType);
-        var op = unaryOperatorMap[opType]?[name];
-        if (op != null) {
-          bodyAnalyzer.wrapExpression(operand, opType);
-          bodyAnalyzer.inject[node] = (c) {
-            c.wrap(node.receiver);
-            op(c);
-          };
-          return opType;
-        }
+    if (node.arguments.positional.length == 1) {
+      // Binary operator
+      Expression left = node.receiver;
+      Expression right = node.arguments.positional.single;
+      DartType argType = dartTypeOf(right);
+      w.ValueType leftType = translator.translateType(receiverType);
+      w.ValueType rightType = translator.translateType(argType);
+      var op = binaryOperatorMap[leftType]?[name]?[rightType];
+      if (op != null) {
+        // TODO: Support differing operand types
+        w.ValueType outType = isComparison(name) ? w.NumType.i32 : leftType;
+        bodyAnalyzer.wrapExpression(left, leftType);
+        bodyAnalyzer.wrapExpression(right, rightType);
+        bodyAnalyzer.inject[node] = (c) {
+          c.wrap(left);
+          c.wrap(right);
+          op(c);
+        };
+        return outType;
+      }
+    } else if (node.arguments.positional.length == 0) {
+      // Unary operator
+      Expression operand = node.receiver;
+      w.ValueType opType = translator.translateType(receiverType);
+      var op = unaryOperatorMap[opType]?[name];
+      if (op != null) {
+        bodyAnalyzer.wrapExpression(operand, opType);
+        bodyAnalyzer.inject[node] = (c) {
+          c.wrap(node.receiver);
+          op(c);
+        };
+        return unaryResultMap[name] ?? opType;
       }
     }
   }

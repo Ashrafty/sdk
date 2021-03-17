@@ -260,6 +260,15 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.struct_set(struct, fieldIndex);
   }
 
+  void visitRedirectingInitializer(RedirectingInitializer node) {
+    b.local_get(thisLocal!);
+    if (options.parameterNullability && thisLocal!.type.nullable) {
+      b.ref_as_non_null();
+    }
+    _visitArguments(node.arguments);
+    _call(node.target.reference);
+  }
+
   void visitSuperInitializer(SuperInitializer node) {
     if ((node.parent as Constructor).enclosingClass.superclass?.superclass ==
         null) {

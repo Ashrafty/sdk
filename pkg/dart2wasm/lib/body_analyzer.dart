@@ -91,6 +91,11 @@ class BodyAnalyzer extends Visitor<w.ValueType>
         node.value, translateType(node.field.type).withNullability(true));
   }
 
+  visitRedirectingInitializer(RedirectingInitializer node) {
+    w.BaseFunction function = translator.functions[node.target.reference]!;
+    return _visitArguments(node.arguments, function.type, 1);
+  }
+
   visitSuperInitializer(SuperInitializer node) {
     w.BaseFunction? function = translator.functions[node.target.reference];
     if (function != null) {
