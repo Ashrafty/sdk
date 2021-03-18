@@ -19,6 +19,7 @@ import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class TranslatorOptions {
+  bool exportAll = false;
   bool inlining = false;
   bool localNullability = false;
   bool parameterNullability = true;
@@ -119,7 +120,7 @@ class Translator {
     for (Procedure printMember in component.libraries
         .firstWhere((l) => l.name == "dart.core")
         .procedures
-        .where((p) => p.name?.name == "print")) {
+        .where((p) => p.name?.text == "print")) {
       functions[printMember.reference] = printFun;
     }
 
@@ -127,10 +128,8 @@ class Translator {
     FunctionCollector(this).collect();
     dispatchTable.output();
 
-    //mainFunction =
-    //    libraries.first.procedures.firstWhere((p) => p.name.name == "main");
-    //w.DefinedFunction mainFun = functions[mainFunction] as w.DefinedFunction;
-    //m.exportFunction("main", mainFun);
+    mainFunction =
+        libraries.first.procedures.firstWhere((p) => p.name?.text == "main");
 
     var codeGen = CodeGenerator(this);
     for (Reference reference in functions.keys) {
@@ -159,7 +158,9 @@ class Translator {
           }
           if (!options.printWasm) print("");
         }
-        m.exportFunction(exportName, function);
+        if (member == mainFunction || options.exportAll) {
+          m.exportFunction(exportName, function);
+        }
         codeGen.generate(reference, function);
         if (options.printWasm) print(function.body.trace);
       }

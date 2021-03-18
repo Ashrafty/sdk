@@ -115,7 +115,7 @@ class Intrinsifier {
 
   w.ValueType? getInstanceGetterIntrinsic(InstanceGet node) {
     DartType receiverType = dartTypeOf(node.receiver);
-    String name = node.name.name;
+    String name = node.name.text;
     if (node.interfaceTarget.enclosingClass == translator.wasmArrayBaseClass) {
       assert(name == 'length');
       DartType elementType =
@@ -134,7 +134,7 @@ class Intrinsifier {
 
   w.ValueType? getInstanceIntrinsic(InstanceInvocation node) {
     DartType receiverType = dartTypeOf(node.receiver);
-    String name = node.name.name;
+    String name = node.name.text;
     if (node.interfaceTarget.enclosingClass?.superclass ==
         translator.wasmArrayBaseClass) {
       DartType elementType =
@@ -274,7 +274,7 @@ class Intrinsifier {
 
   w.ValueType? getStaticIntrinsic(StaticInvocation node) {
     if (node.target.enclosingLibrary == translator.coreTypes.coreLibrary &&
-        node.name.name == "identical") {
+        node.name.text == "identical") {
       Expression first = node.arguments.positional[0];
       Expression second = node.arguments.positional[1];
       // TODO: Support non-reference types
@@ -292,7 +292,7 @@ class Intrinsifier {
     }
 
     if (node.target.enclosingLibrary.name == "dart._internal" &&
-        node.name.name == "unsafeCast") {
+        node.name.text == "unsafeCast") {
       Expression operand = node.arguments.positional.single;
       w.ValueType object = w.RefType.def(
           bodyAnalyzer.codeGen.object.repr.struct,

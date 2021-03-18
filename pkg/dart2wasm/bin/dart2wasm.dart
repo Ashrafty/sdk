@@ -137,6 +137,7 @@ class WasmTarget extends Target {
 
 main(List<String> args) async {
   final Map<String, void Function(TranslatorOptions, bool)> boolOptionMap = {
+    "export-all": (o, value) => o.exportAll = value,
     "inlining": (o, value) => o.inlining = value,
     "local-nullability": (o, value) => o.localNullability = value,
     "parameter-nullability": (o, value) => o.parameterNullability = value,
@@ -197,7 +198,7 @@ main(List<String> args) async {
   Procedure printMember = component.libraries
       .firstWhere((l) => l.name == "dart.core")
       .procedures
-      .firstWhere((p) => p.name?.name == "print");
+      .firstWhere((p) => p.name?.text == "print");
   printMember.isExternal = true;
   printMember.function!.body = null;
 
