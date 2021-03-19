@@ -47,6 +47,7 @@ import 'package:vm/transformations/lowering.dart' as lowering
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 import 'package:vm/transformations/type_flow/transformer.dart' show TreeShaker;
 
+import 'package:dart2wasm/transformers.dart' as wasmTrans;
 import 'package:dart2wasm/translator.dart';
 
 class WasmTarget extends Target {
@@ -78,6 +79,8 @@ class WasmTarget extends Target {
     lowering.transformLibraries(
         libraries, coreTypes, hierarchy, flags.enableNullSafety);
     logger?.call("Lowering transformations performed");
+
+    wasmTrans.transformLibraries(libraries, coreTypes, hierarchy);
   }
 
   @override
@@ -87,6 +90,8 @@ class WasmTarget extends Target {
     lowering.transformProcedure(
         procedure, coreTypes, hierarchy, flags.enableNullSafety);
     logger?.call("Lowering transformations performed");
+
+    wasmTrans.transformProcedure(procedure, coreTypes, hierarchy);
   }
 
   @override
