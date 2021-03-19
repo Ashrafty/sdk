@@ -4,8 +4,9 @@
 
 import 'dart:math';
 
-import 'package:dart2wasm/translator.dart';
 import 'package:dart2wasm/class_info.dart';
+import 'package:dart2wasm/param_info.dart';
+import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
 
@@ -13,14 +14,14 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class SelectorInfo {
   final int id;
-  int paramCount;
+  final ParameterInfo paramInfo;
   int returnCount;
 
   final Map<int, Reference> classes = {};
   late final int offset;
   late final w.FunctionType signature;
 
-  SelectorInfo(this.id, this.paramCount, this.returnCount);
+  SelectorInfo(this.id, this.paramInfo, this.returnCount);
 }
 
 class DispatchTable {
@@ -38,18 +39,14 @@ class DispatchTable {
     int selectorId = isGetter
         ? translator.tableSelectorAssigner.getterSelectorId(member)
         : translator.tableSelectorAssigner.methodOrSetterSelectorId(member);
-    int paramCount = isGetter
-        ? 0
-        : member is Procedure
-            ? member.function!.positionalParameters.length
-            : 1;
+    ParameterInfo paramInfo = ParameterInfo.fromMember(target);
     int returnCount = isGetter ||
             member is Procedure && member.function!.returnType is! VoidType
         ? 1
         : 0;
     var selector = selectorInfo.putIfAbsent(
-        selectorId, () => SelectorInfo(selectorId, paramCount, returnCount));
-    selector.paramCount = min(selector.paramCount, paramCount);
+        selectorId, () => SelectorInfo(selectorId, paramInfo, returnCount));
+    selector.paramInfo.merge(paramInfo);
     selector.returnCount = max(selector.returnCount, returnCount);
     return selector;
   }
@@ -90,41 +87,57 @@ class DispatchTable {
 
     // Compute signatures
     for (SelectorInfo selector in selectorInfo.values) {
+      var nameIndex = selector.paramInfo.nameIndex;
       List<Set<ClassInfo>> inputSets =
-          List.generate(1 + selector.paramCount, (_) => {});
+          List.generate(1 + selector.paramInfo.paramCount, (_) => {});
       List<Set<ClassInfo>> outputSets =
           List.generate(selector.returnCount, (_) => {});
-      List<bool> inputNullable = List.filled(1 + selector.paramCount, false);
+      List<bool> inputNullable =
+          List.filled(1 + selector.paramInfo.paramCount, false);
       List<bool> outputNullable = List.filled(selector.returnCount, false);
       selector.classes.forEach((id, target) {
         ClassInfo receiver = translator.classes[id];
-        List<DartType> params;
+        List<DartType> positional;
+        Map<String, DartType> named;
         List<DartType> returns;
         Member member = target.asMember;
         if (member is Field) {
           if (target.isImplicitGetter) {
-            params = [];
+            positional = [];
+            named = {};
             returns = [member.getterType];
           } else {
-            params = [member.setterType];
+            positional = [member.setterType];
+            named = {};
             returns = [];
           }
         } else {
           FunctionNode function = member.function!;
-          params = [
+          positional = [
             for (VariableDeclaration param in function.positionalParameters)
               param.type
           ];
+          named = {
+            for (VariableDeclaration param in function.namedParameters)
+              param.name!: param.type
+          };
           returns =
               function.returnType is VoidType ? [] : [function.returnType];
         }
-        assert(1 + params.length >= inputSets.length);
         assert(returns.length <= outputSets.length);
         inputSets[0].add(receiver);
-        for (int i = 0; i < selector.paramCount; i++) {
+        for (int i = 0; i < positional.length; i++) {
+          DartType type = positional[i];
           inputSets[1 + i]
-              .add(translator.classInfo[translator.classForType(params[i])]!);
-          inputNullable[1 + i] |= params[i].isPotentiallyNullable;
+              .add(translator.classInfo[translator.classForType(type)]!);
+          inputNullable[1 + i] |= type.isPotentiallyNullable;
+        }
+        for (String name in named.keys) {
+          int i = nameIndex[name]!;
+          DartType type = named[name]!;
+          inputSets[1 + i]
+              .add(translator.classInfo[translator.classForType(type)]!);
+          inputNullable[1 + i] |= type.isPotentiallyNullable;
         }
         for (int i = 0; i < selector.returnCount; i++) {
           if (i < returns.length) {

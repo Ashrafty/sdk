@@ -2,14 +2,15 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:kernel/ast.dart';
-import 'package:kernel/type_environment.dart';
-import 'package:kernel/visitor.dart';
-
 import 'package:dart2wasm/body_analyzer.dart';
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/dispatch_table.dart';
+import 'package:dart2wasm/param_info.dart';
 import 'package:dart2wasm/translator.dart';
+
+import 'package:kernel/ast.dart';
+import 'package:kernel/type_environment.dart';
+import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
@@ -103,11 +104,19 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     //print(bodyAnalyzer.preserved);
     //print(bodyAnalyzer.inject);
 
-    List<VariableDeclaration> params = member.function!.positionalParameters;
-    int implicitParams = paramLocals.length - params.length;
+    ParameterInfo paramInfo = translator.paramInfoFor(reference);
+    int implicitParams =
+        member.isInstanceMember || member is Constructor ? 1 : 0;
     assert(implicitParams == 0 || implicitParams == 1);
-    for (int i = 0; i < params.length; i++) {
-      locals[params[i]] = paramLocals[implicitParams + i];
+    List<VariableDeclaration> positional =
+        member.function!.positionalParameters;
+    for (int i = 0; i < positional.length; i++) {
+      locals[positional[i]] = paramLocals[implicitParams + i];
+    }
+    List<VariableDeclaration> named = member.function!.namedParameters;
+    for (var param in named) {
+      locals[param] =
+          paramLocals[implicitParams + paramInfo.nameIndex[param.name]!];
     }
 
     if (member is Constructor) {
@@ -265,8 +274,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
-    _visitArguments(node.arguments);
-    _call(node.target.reference);
+    _visitArguments(node.arguments, node.targetReference, 1);
+    _call(node.targetReference);
   }
 
   void visitSuperInitializer(SuperInitializer node) {
@@ -278,8 +287,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
-    _visitArguments(node.arguments);
-    _call(node.target.reference);
+    _visitArguments(node.arguments, node.targetReference, 1);
+    _call(node.targetReference);
   }
 
   void visitBlock(Block node) {
@@ -444,16 +453,16 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (options.parameterNullability && temp.type.nullable) {
       b.ref_as_non_null();
     }
-    _visitArguments(node.arguments);
-    _call(node.target.reference);
+    _visitArguments(node.arguments, node.targetReference, 1);
+    _call(node.targetReference);
     if (bodyAnalyzer.preserved.contains(node)) {
       b.local_get(temp);
     }
   }
 
   void visitStaticInvocation(StaticInvocation node) {
-    _visitArguments(node.arguments);
-    _call(node.target.reference);
+    _visitArguments(node.arguments, node.targetReference, 0);
+    _call(node.targetReference);
   }
 
   void visitSuperMethodInvocation(SuperMethodInvocation node) {
@@ -461,8 +470,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
-    _visitArguments(node.arguments);
-    _call(node.interfaceTarget!.reference);
+    _visitArguments(node.arguments, node.interfaceTargetReference!, 1);
+    _call(node.interfaceTargetReference!);
   }
 
   void visitInstanceInvocation(InstanceInvocation node) {
@@ -472,12 +481,12 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
         node.interfaceTarget, node.receiver.getStaticType(typeContext),
         setter: false);
     if (singleTarget != null) {
-      _visitArguments(node.arguments);
+      _visitArguments(node.arguments, node.interfaceTargetReference, 1);
       _call(singleTarget.reference);
       return;
     }
     _virtualCall(target, () {
-      _visitArguments(node.arguments);
+      _visitArguments(node.arguments, node.interfaceTargetReference, 1);
     }, getter: false, setter: false);
   }
 
@@ -706,9 +715,42 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     wrap(node.operand);
   }
 
-  void _visitArguments(Arguments node) {
+  void _visitArguments(Arguments node, Reference target, int signatureOffset) {
+    final w.FunctionType signature = translator.signatureFor(target);
+    final ParameterInfo paramInfo = translator.paramInfoFor(target);
     for (Expression arg in node.positional) {
       wrap(arg);
+    }
+    // Default values for positional parameters
+    for (int i = node.positional.length; i < paramInfo.positional.length; i++) {
+      paramInfo.positional[i]!.accept(this);
+    }
+    // Named arguments
+    final Map<String, w.Local> namedLocals = {};
+    for (var namedArg in node.named) {
+      final w.ValueType type = signature
+          .inputs[signatureOffset + paramInfo.nameIndex[namedArg.name]!];
+      final w.Local namedLocal = function.addLocal(typeForLocal(type));
+      namedLocals[namedArg.name] = namedLocal;
+      wrap(namedArg.value);
+      b.local_set(namedLocal);
+    }
+    for (String name in paramInfo.names) {
+      w.Local? namedLocal = namedLocals[name];
+      final w.ValueType type =
+          signature.inputs[signatureOffset + paramInfo.nameIndex[name]!];
+      if (namedLocal != null) {
+        convertType(namedLocal.type, type, (c) {
+          c.b.local_get(namedLocal);
+        });
+      } else {
+        Constant defaultValue = paramInfo.named[name]!;
+        w.ValueType constantType = bodyAnalyzer.expressionType[defaultValue] ??
+            translateType(defaultValue.getType(typeContext));
+        convertType(constantType, type, (c) {
+          defaultValue.accept(this);
+        });
+      }
     }
   }
 
@@ -759,6 +801,14 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitStringLiteral(StringLiteral node) {
+    // TODO: String contents
+    ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
+    b.i32_const(info.classId);
+    b.global_get(info.rtt);
+    b.struct_new_with_rtt(info.struct);
+  }
+
+  void visitStringConstant(StringConstant node) {
     // TODO: String contents
     ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
     b.i32_const(info.classId);

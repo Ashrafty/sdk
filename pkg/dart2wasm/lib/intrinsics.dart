@@ -2,12 +2,12 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:kernel/ast.dart';
-
 import 'package:dart2wasm/body_analyzer.dart';
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
 import 'package:dart2wasm/translator.dart';
+
+import 'package:kernel/ast.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 

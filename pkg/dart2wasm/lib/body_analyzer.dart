@@ -2,15 +2,16 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
+import 'package:dart2wasm/intrinsics.dart';
+import 'package:dart2wasm/param_info.dart';
+import 'package:dart2wasm/translator.dart';
+
 import 'package:kernel/ast.dart';
 import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
-
-import 'package:dart2wasm/class_info.dart';
-import 'package:dart2wasm/intrinsics.dart';
-import 'package:dart2wasm/translator.dart';
 
 /// Code generation pre-pass with the following responsibilities:
 ///
@@ -92,14 +93,12 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   visitRedirectingInitializer(RedirectingInitializer node) {
-    w.BaseFunction function = translator.functions[node.target.reference]!;
-    return _visitArguments(node.arguments, function.type, 1);
+    return _visitArguments(node.arguments, node.target.reference, 1);
   }
 
   visitSuperInitializer(SuperInitializer node) {
-    w.BaseFunction? function = translator.functions[node.target.reference];
-    if (function != null) {
-      return _visitArguments(node.arguments, function.type, 1);
+    if (translator.functions.containsKey(node.target.reference)) {
+      return _visitArguments(node.arguments, node.target.reference, 1);
     }
     assert(node.arguments.positional.isEmpty && node.arguments.named.isEmpty);
     return voidMarker;
@@ -288,13 +287,38 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType _visitArguments(
-      Arguments arguments, w.FunctionType signature, int signatureOffset) {
-    assert(arguments.positional.length ==
-        signature.inputs.length - signatureOffset);
+      Arguments arguments, Reference target, int signatureOffset,
+      {void Function(w.ValueType)? typeReceiver}) {
+    final w.FunctionType signature = translator.signatureFor(target);
+    final ParameterInfo paramInfo = translator.paramInfoFor(target);
+    typeReceiver?.call(signature.inputs[0]);
     for (int i = 0; i < arguments.positional.length; i++) {
-      wrapExpression(
-          arguments.positional[i], signature.inputs[signatureOffset + i]);
+      final int index = signatureOffset + i;
+      wrapExpression(arguments.positional[i], signature.inputs[index]);
     }
+    for (var param in arguments.named) {
+      final int index = signatureOffset + paramInfo.nameIndex[param.name]!;
+      wrapExpression(param.value, typeForLocal(signature.inputs[index]));
+    }
+
+    // Visit default values to fill in types for null constants.
+    for (int i = arguments.positional.length;
+        i < paramInfo.positional.length;
+        i++) {
+      Constant constant = paramInfo.positional[i]!;
+      if (constant is NullConstant) {
+        final int index = signatureOffset + i;
+        _rememberNullType(constant, signature.inputs[index]);
+      }
+    }
+    for (String name in paramInfo.names) {
+      Constant constant = paramInfo.named[name]!;
+      if (constant is NullConstant) {
+        final int index = signatureOffset + paramInfo.nameIndex[name]!;
+        _rememberNullType(constant, signature.inputs[index]);
+      }
+    }
+
     return translator.outputOrVoid(signature.outputs);
   }
 
@@ -313,11 +337,8 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   w.ValueType visitInstanceInvocation(InstanceInvocation node) {
     w.ValueType? intrinsicResult = intrinsifier.getInstanceIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
-    w.FunctionType signature = translator.dispatchTable
-        .selectorForTarget(node.interfaceTarget.reference)
-        .signature;
-    wrapExpression(node.receiver, signature.inputs[0]);
-    return _visitArguments(node.arguments, signature, 1);
+    return _visitArguments(node.arguments, node.interfaceTarget.reference, 1,
+        typeReceiver: (t) => wrapExpression(node.receiver, t));
   }
 
   w.ValueType visitEqualsNull(EqualsNull node) {
@@ -334,25 +355,18 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitSuperMethodInvocation(SuperMethodInvocation node) {
-    w.FunctionType signature = translator.dispatchTable
-        .selectorForTarget(node.interfaceTarget!.reference)
-        .signature;
-    _visitThis(signature.inputs[0]);
-    return _visitArguments(node.arguments, signature, 1);
+    return _visitArguments(node.arguments, node.interfaceTarget!.reference, 1,
+        typeReceiver: _visitThis);
   }
 
   w.ValueType visitStaticInvocation(StaticInvocation node) {
     w.ValueType? intrinsicResult = intrinsifier.getStaticIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
-    w.FunctionType signature =
-        translator.functions[node.target.reference]!.type;
-    return _visitArguments(node.arguments, signature, 0);
+    return _visitArguments(node.arguments, node.target.reference, 0);
   }
 
   w.ValueType visitConstructorInvocation(ConstructorInvocation node) {
-    w.FunctionType signature =
-        translator.functions[node.target.reference]!.type;
-    _visitArguments(node.arguments, signature, 1);
+    _visitArguments(node.arguments, node.target.reference, 1);
     if (expectedType != voidMarker) {
       preserved.add(node);
       ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
@@ -402,7 +416,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   w.ValueType visitConstantExpression(ConstantExpression node) {
     if (node.constant is NullConstant) {
-      return expressionType[node.constant] = expectedType.withNullability(true);
+      return _rememberNullType(node);
     }
     return typeOfExp(node);
   }
@@ -423,8 +437,17 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     return translateType(translator.coreTypes.stringNonNullableRawType);
   }
 
+  w.ValueType visitStringConstant(StringConstant node) {
+    return translateType(translator.coreTypes.stringNonNullableRawType);
+  }
+
   w.ValueType visitNullLiteral(NullLiteral node) {
-    return expressionType[node] = expectedType.withNullability(true);
+    return _rememberNullType(node);
+  }
+
+  w.ValueType _rememberNullType(Node node, [w.ValueType? type]) {
+    type ??= expectedType;
+    return expressionType[node] = type.withNullability(true);
   }
 
   w.ValueType visitLet(Let node) {

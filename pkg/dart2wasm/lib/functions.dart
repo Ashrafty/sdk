@@ -107,8 +107,16 @@ class FunctionCollector extends MemberVisitor<void> {
       params = [if (target.isImplicitSetter) member.setterType];
     } else {
       FunctionNode function = member.function!;
-      // TODO: Support optional parameters
-      params = function.positionalParameters.map((p) => p.type);
+      List<String> names = [for (var p in function.namedParameters) p.name!]
+        ..sort();
+      Map<String, DartType> nameTypes = {
+        for (var p in function.namedParameters) p.name!: p.type
+      };
+      params = [
+        for (var p in function.positionalParameters) p.type,
+        for (String name in names) nameTypes[name]!
+      ];
+      function.positionalParameters.map((p) => p.type);
     }
 
     List<w.ValueType> inputs = [];

@@ -5,8 +5,9 @@
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
 import 'package:dart2wasm/dispatch_table.dart';
-import 'package:dart2wasm/globals.dart';
 import 'package:dart2wasm/functions.dart';
+import 'package:dart2wasm/globals.dart';
+import 'package:dart2wasm/param_info.dart';
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart'
@@ -56,6 +57,7 @@ class Translator {
   Map<w.HeapType, ClassInfo> classForHeapType = {};
   Map<Field, int> fieldIndex = {};
   Map<Reference, w.BaseFunction> functions = {};
+  Map<Reference, ParameterInfo> staticParamInfo = {};
   late Procedure mainFunction;
   late w.Module m;
   late w.ValueType voidMarker;
@@ -246,6 +248,25 @@ class Translator {
 
   w.ValueType outputOrVoid(List<w.ValueType> outputs) {
     return outputs.isEmpty ? voidMarker : outputs.single;
+  }
+
+  w.FunctionType signatureFor(Reference target) {
+    Member member = target.asMember;
+    if (member.isInstanceMember) {
+      return dispatchTable.selectorForTarget(target).signature;
+    } else {
+      return functions[target]!.type;
+    }
+  }
+
+  ParameterInfo paramInfoFor(Reference target) {
+    Member member = target.asMember;
+    if (member.isInstanceMember) {
+      return dispatchTable.selectorForTarget(target).paramInfo;
+    } else {
+      return staticParamInfo.putIfAbsent(
+          target, () => ParameterInfo.fromMember(target));
+    }
   }
 
   Member? singleTarget(Member interfaceTarget, DartType receiverType,
