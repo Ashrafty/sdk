@@ -342,7 +342,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitEqualsNull(EqualsNull node) {
-    wrapExpression(node.expression, w.RefType.any());
+    wrapExpression(node.expression, objectType);
     return w.NumType.i32;
   }
 

@@ -229,7 +229,7 @@ class Translator {
     }
     if (type is FunctionType) {
       // TODO
-      return w.RefType.any();
+      return translateStorageType(coreTypes.objectNullableRawType);
     }
     throw "Unsupported type ${type.runtimeType}";
   }
