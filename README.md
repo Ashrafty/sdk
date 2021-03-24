@@ -2,6 +2,8 @@
 compiling Dart to [WasmGC](https://github.com/WebAssembly/gc). As of March 2021, it is very much
 work-in-progress and will be updated and rebased regularly.
 
+Usage information for the prototype can be found [here](dart2wasm.md).
+
 # Dart
 
 ## A client-optimized language for fast apps on any platform

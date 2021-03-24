@@ -5,7 +5,7 @@
 // Runner V8 script for testing dart2wasm, takes ".wasm" file as argument.
 // Run as follows:
 //
-// $> d8 --experimental-wasm-gc run.js -- <file_name>.wasm
+// $> d8 --experimental-wasm-gc run_wasm.js -- <file_name>.wasm
 
 // Load binary wasm file.
 var bytes = readbuffer(arguments[0]);
