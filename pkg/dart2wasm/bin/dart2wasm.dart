@@ -39,7 +39,6 @@ import 'package:kernel/vm/constants_native_effects.dart'
     show VmConstantsBackend;
 
 import 'package:vm/kernel_front_end.dart';
-import 'package:vm/target/vm.dart';
 import 'package:vm/transformations/type_flow/analysis.dart';
 import 'package:vm/transformations/type_flow/calls.dart' show DirectSelector;
 import 'package:vm/transformations/lowering.dart' as lowering
@@ -140,21 +139,36 @@ class WasmTarget extends Target {
   bool get supportsNewMethodInvocationEncoding => true;
 }
 
-main(List<String> args) async {
-  final Map<String, void Function(TranslatorOptions, bool)> boolOptionMap = {
-    "export-all": (o, value) => o.exportAll = value,
-    "inlining": (o, value) => o.inlining = value,
-    "local-nullability": (o, value) => o.localNullability = value,
-    "parameter-nullability": (o, value) => o.parameterNullability = value,
-    "polymorphic-specialization": (o, value) =>
-        o.polymorphicSpecialization = value,
-    "print-kernel": (o, value) => o.printKernel = value,
-    "print-wasm": (o, value) => o.printWasm = value,
-  };
-  final Map<String, void Function(TranslatorOptions, int)> intOptionMap = {
-    "watch": (o, value) => (o.watchPoints ??= []).add(value),
-  };
+final Map<String, void Function(TranslatorOptions, bool)> boolOptionMap = {
+  "export-all": (o, value) => o.exportAll = value,
+  "inlining": (o, value) => o.inlining = value,
+  "local-nullability": (o, value) => o.localNullability = value,
+  "parameter-nullability": (o, value) => o.parameterNullability = value,
+  "polymorphic-specialization": (o, value) =>
+      o.polymorphicSpecialization = value,
+  "print-kernel": (o, value) => o.printKernel = value,
+  "print-wasm": (o, value) => o.printWasm = value,
+};
+final Map<String, void Function(TranslatorOptions, int)> intOptionMap = {
+  "watch": (o, value) => (o.watchPoints ??= []).add(value),
+};
 
+Never usage(String message) {
+  print("Usage: dart2wasm [<options>] <infile.dart> <outfile.wasm>");
+  print("");
+  print("Options:");
+  for (String option in boolOptionMap.keys) {
+    print("  --[no-]$option");
+  }
+  for (String option in intOptionMap.keys) {
+    print("  --$option <value>");
+  }
+  print("");
+
+  throw message;
+}
+
+main(List<String> args) async {
   TranslatorOptions options = TranslatorOptions();
   List<String> nonOptions = [];
   void Function(TranslatorOptions, int)? intOptionFun = null;
@@ -164,7 +178,7 @@ main(List<String> args) async {
       intOptionFun = null;
     } else if (arg.startsWith("--no-")) {
       var optionFun = boolOptionMap[arg.substring(5)];
-      if (optionFun == null) throw "Unknown option $arg";
+      if (optionFun == null) usage("Unknown option $arg");
       optionFun(options, false);
     } else if (arg.startsWith("--")) {
       var optionFun = boolOptionMap[arg.substring(2)];
@@ -172,21 +186,21 @@ main(List<String> args) async {
         optionFun(options, true);
       } else {
         intOptionFun = intOptionMap[arg.substring(2)];
-        if (intOptionFun == null) throw "Unknown option $arg";
+        if (intOptionFun == null) usage("Unknown option $arg");
       }
     } else {
       nonOptions.add(arg);
     }
   }
   if (intOptionFun != null) {
-    throw "Missing argument to ${args.last}";
+    usage("Missing argument to ${args.last}");
   }
 
+  if (nonOptions.length != 2) usage("Requires two file arguments");
   String input = nonOptions[0];
   String output = nonOptions[1];
   Uri mainUri = resolveInputUri(input);
 
-  TargetFlags targetFlags = TargetFlags(enableNullSafety: true);
   Target target = WasmTarget();
 
   CompilerOptions compilerOptions = CompilerOptions()
