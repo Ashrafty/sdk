@@ -14,6 +14,9 @@ abstract class _WasmArray extends _WasmBase {
 }
 
 @pragma("wasm:entry-point")
+class WasmDataRef extends _WasmBase {}
+
+@pragma("wasm:entry-point")
 class WasmI8 extends _WasmInt {}
 
 @pragma("wasm:entry-point")

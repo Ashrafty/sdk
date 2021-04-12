@@ -16,6 +16,14 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 typedef CodeGenCallback = void Function(CodeGenerator codeGen);
 
+class Lambda {
+  FunctionExpression expression;
+  w.DefinedFunction function;
+  w.DefinedGlobal global;
+
+  Lambda(this.expression, this.function, this.global);
+}
+
 class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   Translator translator;
   w.ValueType voidMarker;
@@ -32,6 +40,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
   late w.Instructions b;
+
+  List<Lambda> pendingLambdas = [];
 
   CodeGenerator(this.translator) : voidMarker = translator.voidMarker;
 
@@ -99,11 +109,6 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       return;
     }
 
-    bodyAnalyzer = BodyAnalyzer(this);
-    bodyAnalyzer.analyzeMember(member);
-    //print(bodyAnalyzer.preserved);
-    //print(bodyAnalyzer.inject);
-
     ParameterInfo paramInfo = translator.paramInfoFor(reference);
     int implicitParams =
         member.isInstanceMember || member is Constructor ? 1 : 0;
@@ -118,6 +123,11 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       locals[param] =
           paramLocals[implicitParams + paramInfo.nameIndex[param.name]!];
     }
+
+    bodyAnalyzer = BodyAnalyzer(this);
+    bodyAnalyzer.analyzeMember(member);
+    //print(bodyAnalyzer.preserved);
+    //print(bodyAnalyzer.inject);
 
     if (member is Constructor) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
@@ -148,6 +158,26 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       thisLocal = null;
     }
     member.function!.body!.accept(this);
+    b.end();
+  }
+
+  void generateLambda(Lambda lambda) {
+    function = lambda.function;
+    b = function.body;
+    paramLocals = function.locals;
+    returnType = function.type.outputs.single;
+
+    final int implicitParams = 1;
+    List<VariableDeclaration> positional =
+        lambda.expression.function.positionalParameters;
+    for (int i = 0; i < positional.length; i++) {
+      locals[positional[i]] = paramLocals[implicitParams + i];
+    }
+
+    lambda.expression.function.body!.accept(this);
+    if (lambda.expression.function.returnType is VoidType) {
+      b.ref_null(w.HeapType.def(object.struct));
+    }
     b.end();
   }
 
@@ -214,7 +244,11 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       } else {
         // Downcast
         var heapType = (to as w.RefType).heapType;
-        w.Global global = translator.classForHeapType[heapType]!.rtt;
+        ClassInfo? info = translator.classForHeapType[heapType];
+        w.Global global = info != null
+            ? info.rtt
+            : translator.functionTypeRtt[
+                translator.parameterCountForFunctionStruct(heapType)]!;
         bool needsNullCheck = from.nullable && !to.nullable;
         return (c) {
           sub(c);
@@ -695,6 +729,47 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (preserved) b.local_get(temp!);
   }
 
+  @override
+  void visitFunctionExpression(FunctionExpression node) {
+    int parameterCount = node.function.requiredParameterCount;
+    w.FunctionType type = translator.functionType(parameterCount);
+    w.DefinedFunction function = translator.m.addFunction(type);
+    // TODO: Why is it necessary to make a global?
+    w.DefinedGlobal global = translator.m.addGlobal(
+        w.GlobalType(w.RefType.def(type, nullable: false), mutable: false));
+    global.initializer.ref_func(function);
+    global.initializer.end();
+    pendingLambdas.add(Lambda(node, function, global));
+
+    ClassInfo info = translator.classInfo[translator.functionClass]!;
+    w.StructType struct = translator.functionStructType(parameterCount);
+    w.DefinedGlobal rtt = translator.functionTypeRtt[parameterCount]!;
+
+    b.i32_const(info.classId);
+    // TODO: Use actual context
+    b.rtt_canon(translator.dummyContext);
+    b.struct_new_with_rtt(translator.dummyContext);
+    b.global_get(global);
+    b.global_get(rtt);
+    b.struct_new_with_rtt(struct);
+  }
+
+  void visitFunctionInvocation(FunctionInvocation node) {
+    FunctionType functionType = node.functionType!;
+    int parameterCount = functionType.requiredParameterCount;
+    w.StructType struct = translator.functionStructType(parameterCount);
+    w.Local temp = function.addLocal(typeForLocal(translateType(functionType)));
+    wrap(node.receiver);
+    b.local_tee(temp);
+    b.struct_get(struct, 1); // Context
+    for (Expression arg in node.arguments.positional) {
+      wrap(arg);
+    }
+    b.local_get(temp);
+    b.struct_get(struct, 2); // Function
+    b.call_ref();
+  }
+
   void visitLogicalExpression(LogicalExpression node) {
     _conditional(
         node, BoolLiteral(true), BoolLiteral(false), const [w.NumType.i32]);
@@ -707,8 +782,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitConditionalExpression(ConditionalExpression node) {
     w.ValueType? type = bodyAnalyzer.expressionType[node]!;
-    _conditional(
-        node.condition, node.then, node.otherwise, [if (type != null) type]);
+    _conditional(node.condition, node.then, node.otherwise,
+        [if (type != null && type != voidMarker) type]);
   }
 
   void visitNullCheck(NullCheck node) {

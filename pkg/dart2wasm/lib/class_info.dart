@@ -53,37 +53,42 @@ class ClassInfoCollector {
 
   ClassInfoCollector(this.translator) : m = translator.m;
 
+  static w.DefinedGlobal makeRtt(
+      w.Module m, w.StructType struct, ClassInfo? superInfo) {
+    int depth = superInfo != null ? superInfo.depth + 1 : 0;
+    final w.DefinedGlobal rtt =
+        m.addGlobal(w.GlobalType(w.Rtt(struct, depth), mutable: false));
+    final w.Instructions b = rtt.initializer;
+    if (superInfo != null) {
+      b.global_get(superInfo.rtt);
+      b.rtt_sub(struct);
+    } else {
+      b.rtt_canon(struct);
+    }
+    b.end();
+    return rtt;
+  }
+
   void initialize(Class cls) {
     ClassInfo? info = translator.classInfo[cls];
     if (info == null) {
       Class? superclass = cls.superclass;
       if (superclass == null) {
-        const int depth = 0;
         final w.StructType struct = m.addStructType(cls.name);
-        final w.DefinedGlobal rtt =
-            m.addGlobal(w.GlobalType(w.Rtt(struct, depth), mutable: false));
-        final w.Instructions b = rtt.initializer;
-        b.rtt_canon(struct);
-        b.end();
-        info = ClassInfo(cls, nextClassId++, depth, struct, rtt);
+        final w.DefinedGlobal rtt = makeRtt(m, struct, null);
+        info = ClassInfo(cls, nextClassId++, 0, struct, rtt);
       } else {
         initialize(superclass);
         for (Supertype interface in cls.implementedTypes) {
           initialize(interface.classNode);
         }
         ClassInfo superInfo = translator.classInfo[superclass]!;
-        final int depth = superInfo.depth + 1;
         w.StructType struct =
             cls.fields.where((f) => f.isInstanceMember).isEmpty
                 ? superInfo.struct
                 : m.addStructType(cls.name);
-        final w.DefinedGlobal rtt =
-            m.addGlobal(w.GlobalType(w.Rtt(struct, depth), mutable: false));
-        w.Instructions b = rtt.initializer;
-        b.global_get(superInfo.rtt);
-        b.rtt_sub(struct);
-        b.end();
-        info = ClassInfo(cls, nextClassId++, depth, struct, rtt);
+        final w.DefinedGlobal rtt = makeRtt(m, struct, superInfo);
+        info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt);
         info.superInfo = superInfo;
         for (Supertype interface in cls.implementedTypes) {
           translator.classInfo[interface.classNode]!.implementedBy.add(info);
@@ -113,8 +118,11 @@ class ClassInfoCollector {
     }
     for (Field field in info.cls.fields) {
       if (field.isInstanceMember) {
-        w.ValueType wasmType =
-            translator.translateType(field.type).withNullability(true);
+        w.ValueType wasmType = translator.translateType(field.type);
+        // TODO: Generalize this check for finer control
+        if (wasmType != w.RefType.data()) {
+          wasmType = wasmType.withNullability(true);
+        }
         translator.fieldIndex[field] = info.struct.fields.length;
         info.struct.fields.add(w.FieldType(wasmType));
       }

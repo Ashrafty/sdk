@@ -43,13 +43,15 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   bool specializeThis = false;
 
   w.ValueType expectedType;
+  w.ValueType returnType;
 
   BodyAnalyzer(this.codeGen)
       : translator = codeGen.translator,
         voidMarker = codeGen.voidMarker,
         objectType = codeGen.translator
             .translateType(codeGen.translator.coreTypes.objectNullableRawType),
-        expectedType = codeGen.translator.voidMarker {
+        expectedType = codeGen.translator.voidMarker,
+        returnType = codeGen.returnType {
     intrinsifier = Intrinsifier(this);
   }
 
@@ -148,7 +150,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   visitReturnStatement(ReturnStatement node) {
     if (node.expression != null) {
-      wrapExpression(node.expression!, codeGen.returnType);
+      wrapExpression(node.expression!, returnType);
     }
     return voidMarker;
   }
@@ -166,6 +168,15 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitVariableGet(VariableGet node) {
+    TreeNode? variableParent = node.variable.parent;
+    if (variableParent is FunctionNode) {
+      if (variableParent.parent is LocalFunction) {
+        // Lambda parameter
+        return objectType;
+      }
+      assert(variableParent.parent == codeGen.member);
+      return codeGen.locals[node.variable]!.type;
+    }
     return typeForLocal(translateType(node.variable.type));
     // TODO: Create and set promoted local to be able to use promoted type.
     DartType? promotedDartType = node.promotedType;
@@ -373,6 +384,28 @@ class BodyAnalyzer extends Visitor<w.ValueType>
       return typeForLocal(w.RefType.def(info.struct, nullable: false));
     }
     return voidMarker;
+  }
+
+  w.ValueType visitFunctionExpression(FunctionExpression node) {
+    w.ValueType savedReturnType = returnType;
+    returnType = objectType;
+    node.function.body!.accept(this);
+    returnType = savedReturnType;
+    return typeOfExp(node);
+  }
+
+  w.ValueType visitFunctionInvocation(FunctionInvocation node) {
+    int parameterCount = node.arguments.positional.length;
+    wrapExpression(node.receiver, typeOfExp(node.receiver));
+
+    int signatureOffset = 1;
+    final w.FunctionType signature = translator.functionType(parameterCount);
+    for (int i = 0; i < node.arguments.positional.length; i++) {
+      final int index = signatureOffset + i;
+      wrapExpression(node.arguments.positional[i], signature.inputs[index]);
+    }
+
+    return signature.outputs.single;
   }
 
   w.ValueType visitNot(Not node) {

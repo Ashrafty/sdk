@@ -941,7 +941,7 @@ abstract class _StringBase implements String {
       native "String_concatRange";
 }
 
-@pragma("vm:entry-point")
+@pragma("wasm:entry-point")
 class _OneByteString extends _StringBase {
   factory _OneByteString._uninstantiable() {
     throw "Unreachable";
@@ -1235,7 +1235,7 @@ class _OneByteString extends _StringBase {
   }
 }
 
-@pragma("vm:entry-point")
+@pragma("wasm:entry-point")
 class _TwoByteString extends _StringBase {
   factory _TwoByteString._uninstantiable() {
     throw "Unreachable";

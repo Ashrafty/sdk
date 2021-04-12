@@ -21,6 +21,8 @@ class SelectorInfo {
   late final int offset;
   late final w.FunctionType signature;
 
+  String get name => paramInfo.member.name?.text ?? "";
+
   SelectorInfo(this.id, this.paramInfo, this.returnCount);
 }
 

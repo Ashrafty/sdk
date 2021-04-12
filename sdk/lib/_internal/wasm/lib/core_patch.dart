@@ -23,6 +23,7 @@ import "dart:_internal"
         makeListFixedLength,
         patch,
         unsafeCast,
+        WasmDataRef,
         WasmObjectArray,
         writeIntoOneByteString,
         writeIntoTwoByteString;

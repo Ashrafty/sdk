@@ -17,6 +17,7 @@ export 'src/types.dart'
     show
         ArrayType,
         DataType,
+        DefHeapType,
         DefType,
         FieldType,
         FunctionType,

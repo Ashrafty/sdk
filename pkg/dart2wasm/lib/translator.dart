@@ -43,9 +43,11 @@ class Translator {
 
   late final Class wasmTypesBaseClass;
   late final Class wasmArrayBaseClass;
+  late final Class wasmDataRefClass;
   late final Class boxedBoolClass;
   late final Class boxedIntClass;
   late final Class boxedDoubleClass;
+  late final Class functionClass;
   late final Map<Class, w.StorageType> builtinTypes;
   late final Map<w.ValueType, Class> boxedClasses;
 
@@ -61,8 +63,12 @@ class Translator {
   late Procedure mainFunction;
   late w.Module m;
   late w.ValueType voidMarker;
+  late w.StructType dummyContext;
 
   Map<DartType, w.ArrayType> arrayTypeCache = {};
+  Map<int, w.StructType> functionTypeCache = {};
+  Map<w.StructType, int> functionTypeParameterCount = {};
+  Map<int, w.DefinedGlobal> functionTypeRtt = {};
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
       this.tableSelectorAssigner, this.options)
@@ -86,13 +92,16 @@ class Translator {
 
     wasmTypesBaseClass = lookupInternal("_WasmBase");
     wasmArrayBaseClass = lookupInternal("_WasmArray");
+    wasmDataRefClass = lookupInternal("WasmDataRef");
     boxedBoolClass = lookupCore("_BoxedBool");
     boxedIntClass = lookupCore("_BoxedInt");
     boxedDoubleClass = lookupCore("_BoxedDouble");
+    functionClass = lookupCore("_Function");
     builtinTypes = {
       coreTypes.boolClass: w.NumType.i32,
       coreTypes.intClass: w.NumType.i64,
       coreTypes.doubleClass: w.NumType.f64,
+      wasmDataRefClass: w.RefType.data(),
       boxedBoolClass: w.NumType.i32,
       boxedIntClass: w.NumType.i64,
       boxedDoubleClass: w.NumType.f64,
@@ -113,6 +122,7 @@ class Translator {
   w.Module translate() {
     m = w.Module(watchPoints: options.watchPoints);
     voidMarker = w.RefType.def(w.StructType("void"), nullable: true);
+    dummyContext = m.addStructType("<context>");
 
     ClassInfoCollector(this).collect();
     globals = Globals(this);
@@ -165,6 +175,15 @@ class Translator {
         }
         codeGen.generate(reference, function);
         if (options.printWasm) print(function.body.trace);
+
+        while (codeGen.pendingLambdas.isNotEmpty) {
+          Lambda lambda = codeGen.pendingLambdas.removeLast();
+          codeGen.generateLambda(lambda);
+          if (options.printWasm) {
+            print("#${lambda.function.index}");
+            print(lambda.function.body.trace);
+          }
+        }
       }
     }
 
@@ -191,8 +210,10 @@ class Translator {
     throw "Non-value types only allowed in arrays and fields";
   }
 
-  bool _isWasmType(InterfaceType type) {
-    return type.classNode.superclass?.superclass == wasmTypesBaseClass;
+  bool isWasmType(DartType type) {
+    return type is InterfaceType &&
+        (type.classNode.superclass == wasmTypesBaseClass ||
+            type.classNode.superclass?.superclass == wasmTypesBaseClass);
   }
 
   w.StorageType translateStorageType(DartType type) {
@@ -201,7 +222,7 @@ class Translator {
       w.StorageType? builtin = builtinTypes[type.classNode];
       if (builtin != null) {
         if (!type.isPotentiallyNullable) return builtin;
-        if (_isWasmType(type)) throw "Wasm numeric types can't be nullable";
+        if (isWasmType(type)) throw "Wasm numeric types can't be nullable";
         Class? boxedClass = boxedClasses[builtin];
         if (boxedClass != null) {
           type = InterfaceType(boxedClass, type.nullability);
@@ -228,8 +249,13 @@ class Translator {
       return translateStorageType(coreTypes.objectNullableRawType);
     }
     if (type is FunctionType) {
-      // TODO
-      return translateStorageType(coreTypes.objectNullableRawType);
+      if (type.requiredParameterCount != type.positionalParameters.length ||
+          type.namedParameters.isNotEmpty) {
+        throw "Function types with optional parameters not supported: $type";
+      }
+      return w.RefType.def(functionStructType(type.requiredParameterCount),
+          nullable:
+              !options.parameterNullability || type.isPotentiallyNullable);
     }
     throw "Unsupported type ${type.runtimeType}";
   }
@@ -240,6 +266,32 @@ class Translator {
         type,
         () => m.addArrayType("Array<${type.toText(defaultAstTextStrategy)}>")
           ..elementType = w.FieldType(translateStorageType(type)));
+  }
+
+  w.StructType functionStructType(int parameterCount) {
+    return functionTypeCache.putIfAbsent(parameterCount, () {
+      ClassInfo info = classInfo[functionClass]!;
+      w.StructType struct =
+          m.addStructType("Function$parameterCount", info.struct.fields);
+      struct.fields.add(w.FieldType(
+          w.RefType.def(functionType(parameterCount), nullable: false),
+          mutable: false));
+      functionTypeRtt[parameterCount] =
+          ClassInfoCollector.makeRtt(m, struct, info);
+      functionTypeParameterCount[struct] = parameterCount;
+      return struct;
+    });
+  }
+
+  w.FunctionType functionType(int parameterCount) {
+    w.ValueType object = translateType(coreTypes.objectNullableRawType);
+    return m.addFunctionType(
+        [w.RefType.data(), ...List<w.ValueType>.filled(parameterCount, object)],
+        [object]);
+  }
+
+  int parameterCountForFunctionStruct(w.HeapType heapType) {
+    return functionTypeParameterCount[(heapType as w.DefHeapType).def]!;
   }
 
   w.ValueType typeForLocal(w.ValueType type) {

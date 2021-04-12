@@ -195,6 +195,7 @@
           "_internal/wasm/lib/date_patch.dart",
           "_internal/wasm/lib/double.dart",
           "_internal/wasm/lib/expando_patch.dart",
+          "_internal/wasm/lib/function.dart",
           "_internal/wasm/lib/growable_array.dart",
           "_internal/wasm/lib/immutable_map.dart",
           "_internal/wasm/lib/int.dart",

@@ -354,6 +354,26 @@ class Instructions with SerializerMixin {
     writeUnsigned(table?.index ?? 0);
   }
 
+  bool _verifyCallRef() {
+    ValueType fun = _topOfStack;
+    if (fun is RefType) {
+      var heapType = fun.heapType;
+      if (heapType is DefHeapType) {
+        var defType = heapType.def;
+        if (defType is FunctionType) {
+          return _verifyTypes([...defType.inputs, fun], defType.outputs,
+              trace: ['call_ref']);
+        }
+      }
+    }
+    _reportError("Expected function type, got $fun");
+  }
+
+  void call_ref() {
+    assert(_verifyCallRef());
+    writeByte(0x14);
+  }
+
   // Parametric instructions
 
   void drop() {
