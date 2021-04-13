@@ -132,7 +132,7 @@ class Translator {
     for (Procedure printMember in component.libraries
         .firstWhere((l) => l.name == "dart.core")
         .procedures
-        .where((p) => p.name?.text == "print")) {
+        .where((p) => p.name.text == "print")) {
       functions[printMember.reference] = printFun;
     }
 
@@ -141,7 +141,7 @@ class Translator {
     dispatchTable.output();
 
     mainFunction =
-        libraries.first.procedures.firstWhere((p) => p.name?.text == "main");
+        libraries.first.procedures.firstWhere((p) => p.name.text == "main");
 
     var codeGen = CodeGenerator(this);
     for (Reference reference in functions.keys) {

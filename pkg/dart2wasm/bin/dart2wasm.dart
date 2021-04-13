@@ -68,7 +68,7 @@ class WasmTarget extends Target {
       List<Library> libraries,
       Map<String, String> environmentDefines,
       DiagnosticReporter diagnosticReporter,
-      ReferenceFromIndex referenceFromIndex,
+      ReferenceFromIndex? referenceFromIndex,
       {void logger(String msg)?,
       ChangedStructureNotifier? changedStructureNotifier}) {
     transformMixins.transformLibraries(
@@ -84,7 +84,10 @@ class WasmTarget extends Target {
 
   @override
   void performTransformationsOnProcedure(
-      CoreTypes coreTypes, ClassHierarchy hierarchy, Procedure procedure,
+      CoreTypes coreTypes,
+      ClassHierarchy hierarchy,
+      Procedure procedure,
+      Map<String, String> environmentDefines,
       {void logger(String msg)?}) {
     lowering.transformProcedure(
         procedure, coreTypes, hierarchy, flags.enableNullSafety);
@@ -217,7 +220,7 @@ main(List<String> args) async {
   Procedure printMember = component.libraries
       .firstWhere((l) => l.name == "dart.core")
       .procedures
-      .firstWhere((p) => p.name?.text == "print");
+      .firstWhere((p) => p.name.text == "print");
   printMember.isExternal = true;
   printMember.function!.body = null;
 
