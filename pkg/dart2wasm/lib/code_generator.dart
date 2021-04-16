@@ -14,8 +14,6 @@ import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
-typedef CodeGenCallback = void Function(CodeGenerator codeGen);
-
 class Lambda {
   FunctionExpression expression;
   w.DefinedFunction function;
@@ -85,23 +83,23 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       void getThis() {
         w.Local thisLocal = paramLocals[0];
         w.RefType structType = w.RefType.def(struct, nullable: true);
-        convertType(thisLocal.type, structType, (c) {
-          c.b.local_get(thisLocal);
+        translator.convertType(b, thisLocal.type, structType, (b) {
+          b.local_get(thisLocal);
         });
       }
 
       if (reference.isImplicitGetter) {
         // Implicit getter
-        convertType(fieldType, returnType, (c) {
+        translator.convertType(b, fieldType, returnType, (b) {
           getThis();
-          c.b.struct_get(struct, index);
+          b.struct_get(struct, index);
         });
       } else {
         // Implicit setter
         w.Local valueLocal = paramLocals[1];
         getThis();
-        convertType(valueLocal.type, fieldType, (c) {
-          c.b.local_get(valueLocal);
+        translator.convertType(b, valueLocal.type, fieldType, (b) {
+          b.local_get(valueLocal);
         });
         b.struct_set(struct, index);
       }
@@ -181,92 +179,10 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.end();
   }
 
-  void convertType(w.ValueType from, w.ValueType to, CodeGenCallback sub) {
-    CodeGenCallback? callback = convertTypeCallback(from, to, sub);
-    if (callback != null) {
-      callback(this);
-    } else {
-      sub(this);
-    }
-  }
-
-  CodeGenCallback? convertTypeCallback(
-      w.ValueType from, w.ValueType to, CodeGenCallback sub) {
-    if (from == voidMarker || to == voidMarker) {
-      if (from != voidMarker) {
-        return (c) {
-          sub(c);
-          c.b.drop();
-        };
-      }
-      if (to != voidMarker) {
-        // This can happen when a void method has its return type overridden to
-        // return a value, in which case the selector signature will have a
-        // non-void return type to encompass all possible return values.
-        w.RefType toRef = to as w.RefType;
-        assert(toRef.nullable);
-        return (c) {
-          sub(c);
-          c.b.ref_null(toRef.heapType);
-        };
-      }
-    }
-    if (!from.isSubtypeOf(to)) {
-      if (from is! w.RefType && to is w.RefType) {
-        // Boxing
-        ClassInfo info = translator.classInfo[translator.boxedClasses[from]!]!;
-        assert(w.HeapType.def(info.struct).isSubtypeOf(to.heapType));
-        return (c) {
-          c.b.i32_const(info.classId);
-          sub(c);
-          c.b.global_get(info.rtt);
-          c.b.struct_new_with_rtt(info.struct);
-        };
-      } else if (from is w.RefType && to is! w.RefType) {
-        // Unboxing
-        ClassInfo info = translator.classInfo[translator.boxedClasses[to]!]!;
-        bool needsCast =
-            !from.heapType.isSubtypeOf(w.HeapType.def(info.struct));
-        return (c) {
-          sub(c);
-          if (needsCast) {
-            c.b.global_get(info.rtt);
-            c.b.ref_cast();
-          }
-          c.b.struct_get(info.struct, 1);
-        };
-      } else if (from.withNullability(false).isSubtypeOf(to)) {
-        // Null check
-        return (c) {
-          sub(c);
-          c.b.ref_as_non_null();
-        };
-      } else {
-        // Downcast
-        var heapType = (to as w.RefType).heapType;
-        ClassInfo? info = translator.classForHeapType[heapType];
-        w.Global global = info != null
-            ? info.rtt
-            : translator.functionTypeRtt[
-                translator.parameterCountForFunctionStruct(heapType)]!;
-        bool needsNullCheck = from.nullable && !to.nullable;
-        return (c) {
-          sub(c);
-          if (needsNullCheck) {
-            c.b.ref_as_non_null();
-          }
-          c.b.global_get(global);
-          c.b.ref_cast();
-        };
-      }
-    }
-    return null;
-  }
-
   void wrap(TreeNode node) {
     CodeGenCallback? injection = bodyAnalyzer.inject[node];
     if (injection != null) {
-      injection(this);
+      injection(b);
     } else {
       node.accept(this);
     }
@@ -456,7 +372,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (expression != null) {
       wrap(expression);
     } else {
-      convertType(voidMarker, returnType, (c) {});
+      translator.convertType(b, voidMarker, returnType, (b) {});
     }
     if (returnLabel != null) {
       b.br(returnLabel!);
@@ -817,8 +733,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       final w.ValueType type =
           signature.inputs[signatureOffset + paramInfo.nameIndex[name]!];
       if (namedLocal != null) {
-        convertType(namedLocal.type, type, (c) {
-          c.b.local_get(namedLocal);
+        translator.convertType(b, namedLocal.type, type, (b) {
+          b.local_get(namedLocal);
         });
       } else {
         translator.constants

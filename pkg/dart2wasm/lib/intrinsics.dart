@@ -28,6 +28,7 @@ class Intrinsifier {
   static const bool isNotEquals = true;
 
   Translator get translator => bodyAnalyzer.translator;
+  CodeGenerator get codeGen => bodyAnalyzer.codeGen;
 
   DartType dartTypeOf(Expression exp) {
     return exp.getStaticType(bodyAnalyzer.codeGen.typeContext);
@@ -41,53 +42,53 @@ class Intrinsifier {
         doubleType = w.NumType.f64 {
     binaryOperatorMap = {
       intType: {
-        '+': {intType: (c) => c.b.i64_add()},
-        '-': {intType: (c) => c.b.i64_sub()},
-        '*': {intType: (c) => c.b.i64_mul()},
-        '~/': {intType: (c) => c.b.i64_div_s()},
-        '%': {intType: (c) => c.b.i64_rem_s()},
-        '&': {intType: (c) => c.b.i64_and()},
-        '|': {intType: (c) => c.b.i64_or()},
-        '^': {intType: (c) => c.b.i64_xor()},
-        '<<': {intType: (c) => c.b.i64_shl()},
-        '>>': {intType: (c) => c.b.i64_shr_s()},
-        '<': {intType: (c) => c.b.i64_lt_s()},
-        '<=': {intType: (c) => c.b.i64_le_s()},
-        '>': {intType: (c) => c.b.i64_gt_s()},
-        '>=': {intType: (c) => c.b.i64_ge_s()},
+        '+': {intType: (b) => b.i64_add()},
+        '-': {intType: (b) => b.i64_sub()},
+        '*': {intType: (b) => b.i64_mul()},
+        '~/': {intType: (b) => b.i64_div_s()},
+        '%': {intType: (b) => b.i64_rem_s()},
+        '&': {intType: (b) => b.i64_and()},
+        '|': {intType: (b) => b.i64_or()},
+        '^': {intType: (b) => b.i64_xor()},
+        '<<': {intType: (b) => b.i64_shl()},
+        '>>': {intType: (b) => b.i64_shr_s()},
+        '<': {intType: (b) => b.i64_lt_s()},
+        '<=': {intType: (b) => b.i64_le_s()},
+        '>': {intType: (b) => b.i64_gt_s()},
+        '>=': {intType: (b) => b.i64_ge_s()},
       },
       doubleType: {
-        '+': {doubleType: (c) => c.b.f64_add()},
-        '-': {doubleType: (c) => c.b.f64_sub()},
-        '*': {doubleType: (c) => c.b.f64_mul()},
-        '/': {doubleType: (c) => c.b.f64_div()},
-        '<': {doubleType: (c) => c.b.f64_lt()},
-        '<=': {doubleType: (c) => c.b.f64_le()},
-        '>': {doubleType: (c) => c.b.f64_gt()},
-        '>=': {doubleType: (c) => c.b.f64_ge()},
+        '+': {doubleType: (b) => b.f64_add()},
+        '-': {doubleType: (b) => b.f64_sub()},
+        '*': {doubleType: (b) => b.f64_mul()},
+        '/': {doubleType: (b) => b.f64_div()},
+        '<': {doubleType: (b) => b.f64_lt()},
+        '<=': {doubleType: (b) => b.f64_le()},
+        '>': {doubleType: (b) => b.f64_gt()},
+        '>=': {doubleType: (b) => b.f64_ge()},
       }
     };
 
     unaryOperatorMap = {
       intType: {
-        'unary-': (c) {
-          c.b.i64_const(-1);
-          c.b.i64_mul();
+        'unary-': (b) {
+          b.i64_const(-1);
+          b.i64_mul();
         },
-        '~': (c) {
-          c.b.i64_const(-1);
-          c.b.i64_xor();
+        '~': (b) {
+          b.i64_const(-1);
+          b.i64_xor();
         },
-        'toDouble': (c) {
-          c.b.f64_convert_i64_s();
+        'toDouble': (b) {
+          b.f64_convert_i64_s();
         },
       },
       doubleType: {
-        'unary-': (c) {
-          c.b.f64_neg();
+        'unary-': (b) {
+          b.f64_neg();
         },
-        'toInt': (c) {
-          c.b.i64_trunc_sat_f64_s();
+        'toInt': (b) {
+          b.i64_trunc_sat_f64_s();
         }
       },
     };
@@ -100,14 +101,14 @@ class Intrinsifier {
     equalsMap = {
       intType: {
         intType: {
-          isEquals: (c) => c.b.i64_eq(),
-          isNotEquals: (c) => c.b.i64_ne(),
+          isEquals: (b) => b.i64_eq(),
+          isNotEquals: (b) => b.i64_ne(),
         }
       },
       doubleType: {
         doubleType: {
-          isEquals: (c) => c.b.f64_eq(),
-          isNotEquals: (c) => c.b.f64_ne(),
+          isEquals: (b) => b.f64_eq(),
+          isNotEquals: (b) => b.f64_ne(),
         }
       },
     };
@@ -123,10 +124,10 @@ class Intrinsifier {
       w.ArrayType arrayType = translator.arrayType(elementType);
       Expression array = node.receiver;
       bodyAnalyzer.wrapExpression(array, bodyAnalyzer.typeOfExp(array));
-      bodyAnalyzer.inject[node] = (c) {
-        c.wrap(array);
-        c.b.array_len(arrayType);
-        c.b.i64_extend_i32_u();
+      bodyAnalyzer.inject[node] = (b) {
+        codeGen.wrap(array);
+        b.array_len(arrayType);
+        b.i64_extend_i32_u();
       };
       return w.NumType.i64;
     }
@@ -155,27 +156,27 @@ class Intrinsifier {
           bodyAnalyzer.wrapExpression(
               array, w.RefType.def(arrayType, nullable: true));
           bodyAnalyzer.wrapExpression(index, w.NumType.i64);
-          bodyAnalyzer.inject[node] = (c) {
-            c.wrap(array);
-            c.wrap(index);
-            c.b.i32_wrap_i64();
+          bodyAnalyzer.inject[node] = (b) {
+            codeGen.wrap(array);
+            codeGen.wrap(index);
+            b.i32_wrap_i64();
             if (innerExtend) {
               if (unsigned) {
-                c.b.array_get_u(arrayType);
+                b.array_get_u(arrayType);
               } else {
-                c.b.array_get_s(arrayType);
+                b.array_get_s(arrayType);
               }
             } else {
-              c.b.array_get(arrayType);
+              b.array_get(arrayType);
             }
             if (outerExtend) {
               if (wasmType == w.NumType.f32) {
-                c.b.f64_promote_f32();
+                b.f64_promote_f32();
               } else {
                 if (unsigned) {
-                  c.b.i64_extend_i32_u();
+                  b.i64_extend_i32_u();
                 } else {
-                  c.b.i64_extend_i32_s();
+                  b.i64_extend_i32_s();
                 }
               }
             }
@@ -190,19 +191,19 @@ class Intrinsifier {
           bodyAnalyzer.wrapExpression(index, w.NumType.i64);
           bodyAnalyzer.wrapExpression(
               value, bodyAnalyzer.translateType(elementType));
-          bodyAnalyzer.inject[node] = (c) {
-            c.wrap(array);
-            c.wrap(index);
-            c.b.i32_wrap_i64();
-            c.wrap(value);
+          bodyAnalyzer.inject[node] = (b) {
+            codeGen.wrap(array);
+            codeGen.wrap(index);
+            b.i32_wrap_i64();
+            codeGen.wrap(value);
             if (outerExtend) {
               if (wasmType == w.NumType.f32) {
-                c.b.f32_demote_f64();
+                b.f32_demote_f64();
               } else {
-                c.b.i32_wrap_i64();
+                b.i32_wrap_i64();
               }
             }
-            c.b.array_set(arrayType);
+            b.array_set(arrayType);
           };
           return bodyAnalyzer.voidMarker;
         default:
@@ -223,10 +224,10 @@ class Intrinsifier {
         w.ValueType outType = isComparison(name) ? w.NumType.i32 : leftType;
         bodyAnalyzer.wrapExpression(left, leftType);
         bodyAnalyzer.wrapExpression(right, rightType);
-        bodyAnalyzer.inject[node] = (c) {
-          c.wrap(left);
-          c.wrap(right);
-          op(c);
+        bodyAnalyzer.inject[node] = (b) {
+          codeGen.wrap(left);
+          codeGen.wrap(right);
+          op(b);
         };
         return outType;
       }
@@ -237,9 +238,9 @@ class Intrinsifier {
       var op = unaryOperatorMap[opType]?[name];
       if (op != null) {
         bodyAnalyzer.wrapExpression(operand, opType);
-        bodyAnalyzer.inject[node] = (c) {
-          c.wrap(node.receiver);
-          op(c);
+        bodyAnalyzer.inject[node] = (b) {
+          codeGen.wrap(node.receiver);
+          op(b);
         };
         return unaryResultMap[name] ?? opType;
       }
@@ -252,10 +253,10 @@ class Intrinsifier {
     if (leftType == intType && rightType == intType) {
       bodyAnalyzer.wrapExpression(node.left, w.NumType.i64);
       bodyAnalyzer.wrapExpression(node.right, w.NumType.i64);
-      bodyAnalyzer.inject[node] = (c) {
-        c.wrap(node.left);
-        c.wrap(node.right);
-        c.b.i64_eq();
+      bodyAnalyzer.inject[node] = (b) {
+        codeGen.wrap(node.left);
+        codeGen.wrap(node.right);
+        b.i64_eq();
       };
       return w.NumType.i32;
     }
@@ -263,10 +264,10 @@ class Intrinsifier {
     if (leftType == doubleType && rightType == doubleType) {
       bodyAnalyzer.wrapExpression(node.left, w.NumType.f64);
       bodyAnalyzer.wrapExpression(node.right, w.NumType.f64);
-      bodyAnalyzer.inject[node] = (c) {
-        c.wrap(node.left);
-        c.wrap(node.right);
-        c.b.f64_eq();
+      bodyAnalyzer.inject[node] = (b) {
+        codeGen.wrap(node.left);
+        codeGen.wrap(node.right);
+        b.f64_eq();
       };
       return w.NumType.i32;
     }
@@ -283,10 +284,10 @@ class Intrinsifier {
           nullable: true);
       bodyAnalyzer.wrapExpression(first, object);
       bodyAnalyzer.wrapExpression(second, object);
-      bodyAnalyzer.inject[node] = (c) {
-        c.wrap(first);
-        c.wrap(second);
-        c.b.ref_eq();
+      bodyAnalyzer.inject[node] = (b) {
+        codeGen.wrap(first);
+        codeGen.wrap(second);
+        b.ref_eq();
       };
       return w.NumType.i32;
     }
@@ -303,10 +304,10 @@ class Intrinsifier {
           : translator.coreTypes.objectNullableRawType;
       ClassInfo info = translator.classInfo[interfaceType.classNode]!;
       bodyAnalyzer.wrapExpression(operand, object);
-      bodyAnalyzer.inject[node] = (c) {
-        c.wrap(operand);
-        c.b.global_get(info.repr.rtt);
-        c.b.ref_cast();
+      bodyAnalyzer.inject[node] = (b) {
+        codeGen.wrap(operand);
+        b.global_get(info.repr.rtt);
+        b.ref_cast();
       };
       return w.RefType.def(info.repr.struct,
           nullable: targetType.isPotentiallyNullable);
@@ -317,12 +318,12 @@ class Intrinsifier {
       Expression length = node.arguments.positional[0];
       w.ArrayType arrayType = translator.arrayType(node.arguments.types.single);
       bodyAnalyzer.wrapExpression(length, w.NumType.i64);
-      bodyAnalyzer.inject[node] = (c) {
+      bodyAnalyzer.inject[node] = (b) {
         // TODO: Support filling with other than default value
-        c.wrap(node.arguments.positional.first);
-        c.b.i32_wrap_i64();
-        c.b.rtt_canon(arrayType);
-        c.b.array_new_default_with_rtt(arrayType);
+        codeGen.wrap(node.arguments.positional.first);
+        b.i32_wrap_i64();
+        b.rtt_canon(arrayType);
+        b.array_new_default_with_rtt(arrayType);
       };
       return w.RefType.def(arrayType, nullable: false);
     }

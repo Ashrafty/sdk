@@ -80,8 +80,8 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   w.ValueType wrapExpression(Expression exp, w.ValueType expectedType) {
     this.expectedType = expectedType;
     w.ValueType resultType = exp.accept(this);
-    CodeGenCallback? conversion = codeGen.convertTypeCallback(
-        resultType, expectedType, (c) => exp.accept(c));
+    CodeGenCallback? conversion = translator.convertTypeCallback(
+        resultType, expectedType, (b) => exp.accept(codeGen));
     if (conversion != null) {
       inject[exp] = conversion;
       return expectedType;

@@ -31,6 +31,8 @@ class TranslatorOptions {
   List<int>? watchPoints = null;
 }
 
+typedef CodeGenCallback = void Function(w.Instructions);
+
 class Translator {
   final TranslatorOptions options;
 
@@ -303,6 +305,88 @@ class Translator {
 
   w.ValueType outputOrVoid(List<w.ValueType> outputs) {
     return outputs.isEmpty ? voidMarker : outputs.single;
+  }
+
+  void convertType(
+      w.Instructions b, w.ValueType from, w.ValueType to, CodeGenCallback sub) {
+    CodeGenCallback? callback = convertTypeCallback(from, to, sub);
+    if (callback != null) {
+      callback(b);
+    } else {
+      sub(b);
+    }
+  }
+
+  CodeGenCallback? convertTypeCallback(
+      w.ValueType from, w.ValueType to, CodeGenCallback sub) {
+    if (from == voidMarker || to == voidMarker) {
+      if (from != voidMarker) {
+        return (b) {
+          sub(b);
+          b.drop();
+        };
+      }
+      if (to != voidMarker) {
+        // This can happen when a void method has its return type overridden to
+        // return a value, in which case the selector signature will have a
+        // non-void return type to encompass all possible return values.
+        w.RefType toRef = to as w.RefType;
+        assert(toRef.nullable);
+        return (b) {
+          sub(b);
+          b.ref_null(toRef.heapType);
+        };
+      }
+    }
+    if (!from.isSubtypeOf(to)) {
+      if (from is! w.RefType && to is w.RefType) {
+        // Boxing
+        ClassInfo info = classInfo[boxedClasses[from]!]!;
+        assert(w.HeapType.def(info.struct).isSubtypeOf(to.heapType));
+        return (b) {
+          b.i32_const(info.classId);
+          sub(b);
+          b.global_get(info.rtt);
+          b.struct_new_with_rtt(info.struct);
+        };
+      } else if (from is w.RefType && to is! w.RefType) {
+        // Unboxing
+        ClassInfo info = classInfo[boxedClasses[to]!]!;
+        bool needsCast =
+            !from.heapType.isSubtypeOf(w.HeapType.def(info.struct));
+        return (b) {
+          sub(b);
+          if (needsCast) {
+            b.global_get(info.rtt);
+            b.ref_cast();
+          }
+          b.struct_get(info.struct, 1);
+        };
+      } else if (from.withNullability(false).isSubtypeOf(to)) {
+        // Null check
+        return (b) {
+          sub(b);
+          b.ref_as_non_null();
+        };
+      } else {
+        // Downcast
+        var heapType = (to as w.RefType).heapType;
+        ClassInfo? info = classForHeapType[heapType];
+        w.Global global = info != null
+            ? info.rtt
+            : functionTypeRtt[parameterCountForFunctionStruct(heapType)]!;
+        bool needsNullCheck = from.nullable && !to.nullable;
+        return (b) {
+          sub(b);
+          if (needsNullCheck) {
+            b.ref_as_non_null();
+          }
+          b.global_get(global);
+          b.ref_cast();
+        };
+      }
+    }
+    return null;
   }
 
   w.FunctionType signatureFor(Reference target) {
