@@ -798,7 +798,9 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
     // Default values for positional parameters
     for (int i = node.positional.length; i < paramInfo.positional.length; i++) {
-      paramInfo.positional[i]!.accept(this);
+      final w.ValueType type = signature.inputs[signatureOffset + i];
+      translator.constants
+          .instantiateConstant(b, paramInfo.positional[i]!, type);
     }
     // Named arguments
     final Map<String, w.Local> namedLocals = {};
@@ -819,12 +821,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
           c.b.local_get(namedLocal);
         });
       } else {
-        Constant defaultValue = paramInfo.named[name]!;
-        w.ValueType constantType = bodyAnalyzer.expressionType[defaultValue] ??
-            translateType(defaultValue.getType(typeContext));
-        convertType(constantType, type, (c) {
-          defaultValue.accept(this);
-        });
+        translator.constants
+            .instantiateConstant(b, paramInfo.named[name]!, type);
       }
     }
   }
@@ -848,14 +846,21 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitConstantExpression(ConstantExpression node) {
-    node.constant.accept(this);
+    translator.constants.instantiateConstant(
+        b, node.constant, bodyAnalyzer.expressionType[node]);
+  }
+
+  void visitNullLiteral(NullLiteral node) {
+    translator.constants.instantiateConstant(
+        b, NullConstant(), bodyAnalyzer.expressionType[node]);
+  }
+
+  void visitStringLiteral(StringLiteral node) {
+    translator.constants
+        .instantiateConstant(b, StringConstant(node.value), null);
   }
 
   void visitBoolLiteral(BoolLiteral node) {
-    b.i32_const(node.value ? 1 : 0);
-  }
-
-  void visitBoolConstant(BoolConstant node) {
     b.i32_const(node.value ? 1 : 0);
   }
 
@@ -863,32 +868,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.i64_const(node.value);
   }
 
-  void visitIntConstant(IntConstant node) {
-    b.i64_const(node.value);
-  }
-
   void visitDoubleLiteral(DoubleLiteral node) {
     b.f64_const(node.value);
-  }
-
-  void visitDoubleConstant(DoubleConstant node) {
-    b.f64_const(node.value);
-  }
-
-  void visitStringLiteral(StringLiteral node) {
-    // TODO: String contents
-    ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
-    b.i32_const(info.classId);
-    b.global_get(info.rtt);
-    b.struct_new_with_rtt(info.struct);
-  }
-
-  void visitStringConstant(StringConstant node) {
-    // TODO: String contents
-    ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
-    b.i32_const(info.classId);
-    b.global_get(info.rtt);
-    b.struct_new_with_rtt(info.struct);
   }
 
   void visitIsExpression(IsExpression node) {
@@ -918,22 +899,5 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   void visitAsExpression(AsExpression node) {
     wrap(node.operand);
     // TODO: Check
-  }
-
-  void _emitNull(Node node) {
-    w.ValueType wasmType = bodyAnalyzer.expressionType[node]!;
-    if (wasmType != voidMarker) {
-      w.HeapType heapType =
-          wasmType is w.RefType ? wasmType.heapType : w.HeapType.any;
-      b.ref_null(heapType);
-    }
-  }
-
-  void visitNullLiteral(NullLiteral node) {
-    _emitNull(node);
-  }
-
-  void visitNullConstant(NullConstant node) {
-    _emitNull(node);
   }
 }

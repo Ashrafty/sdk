@@ -4,6 +4,7 @@
 
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
+import 'package:dart2wasm/constants.dart';
 import 'package:dart2wasm/dispatch_table.dart';
 import 'package:dart2wasm/functions.dart';
 import 'package:dart2wasm/globals.dart';
@@ -53,6 +54,7 @@ class Translator {
 
   late final DispatchTable dispatchTable;
   late final Globals globals;
+  late final Constants constants;
 
   List<ClassInfo> classes = [];
   Map<Class, ClassInfo> classInfo = {};
@@ -126,6 +128,7 @@ class Translator {
 
     ClassInfoCollector(this).collect();
     globals = Globals(this);
+    constants = Constants(this);
 
     w.FunctionType printType = m.addFunctionType([w.NumType.i64], []);
     w.ImportedFunction printFun = m.importFunction("console", "log", printType);
