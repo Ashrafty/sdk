@@ -18,7 +18,7 @@ class ConstantInfo {
   ConstantInfo(this.constant, this.global, this.function);
 }
 
-typedef ConstantCodeGenerator = void Function(w.Instructions);
+typedef ConstantCodeGenerator = void Function(w.DefinedFunction);
 
 class Constants {
   final Translator translator;
@@ -26,18 +26,18 @@ class Constants {
 
   Constants(this.translator);
 
-  void instantiateConstant(
-      w.Instructions b, Constant constant, w.ValueType? expectedType) {
-    constant.accept(ConstantInstantiator(this, b, expectedType));
+  void instantiateConstant(w.DefinedFunction function, Constant constant,
+      w.ValueType? expectedType) {
+    constant.accept(ConstantInstantiator(this, function, expectedType));
   }
 }
 
 class ConstantInstantiator extends ConstantVisitor<void> {
   final Constants constants;
-  final w.Instructions b;
+  final w.DefinedFunction function;
   final w.ValueType? expectedType;
 
-  ConstantInstantiator(this.constants, this.b, this.expectedType);
+  ConstantInstantiator(this.constants, this.function, this.expectedType);
 
   Translator get translator => constants.translator;
   w.Module get m => translator.m;
@@ -53,14 +53,16 @@ class ConstantInstantiator extends ConstantVisitor<void> {
       global.initializer.end();
       w.FunctionType ftype = m.addFunctionType([], [type]);
       w.DefinedFunction function = m.addFunction(ftype);
-      generator(function.body);
-      function.body.global_set(global);
-      function.body.global_get(global);
-      function.body.ref_as_non_null();
-      function.body.end();
+      generator(function);
+      w.Instructions b = function.body;
+      b.global_set(global);
+      b.global_get(global);
+      b.ref_as_non_null();
+      b.end();
       info = ConstantInfo(constant, global, function);
       constants.constantInfo[constant] = info;
     }
+    w.Instructions b = function.body;
     w.Label b1 = b.block([], [type]);
     w.Label b2 = b.block([], []);
     b.global_get(info.global);
@@ -69,6 +71,14 @@ class ConstantInstantiator extends ConstantVisitor<void> {
     b.end();
     b.call(info.function);
     b.end();
+  }
+
+  void convertType(w.ValueType from, w.ValueType? to, CodeGenCallback code) {
+    if (to != null) {
+      translator.convertType(function.body, from, to, code);
+    } else {
+      code(function.body);
+    }
   }
 
   void defaultConstant(Constant node) {
@@ -81,32 +91,37 @@ class ConstantInstantiator extends ConstantVisitor<void> {
     if (expectedType != constants.translator.voidMarker) {
       w.HeapType heapType =
           expectedType is w.RefType ? expectedType.heapType : w.HeapType.data;
+      w.Instructions b = function.body;
       b.ref_null(heapType);
     }
   }
 
   @override
   void visitBoolConstant(BoolConstant constant) {
-    // TODO: box
-    b.i32_const(constant.value ? 1 : 0);
+    convertType(w.NumType.i32, expectedType, (b) {
+      b.i32_const(constant.value ? 1 : 0);
+    });
   }
 
   @override
   void visitIntConstant(IntConstant constant) {
-    // TODO: box
-    b.i64_const(constant.value);
+    convertType(w.NumType.i64, expectedType, (b) {
+      b.i64_const(constant.value);
+    });
   }
 
   @override
   void visitDoubleConstant(DoubleConstant constant) {
-    // TODO: box
-    b.f64_const(constant.value);
+    convertType(w.NumType.f64, expectedType, (b) {
+      b.f64_const(constant.value);
+    });
   }
 
   @override
   void visitStringConstant(StringConstant constant) {
     // TODO: String contents
     ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
+    w.Instructions b = function.body;
     b.i32_const(info.classId);
     b.global_get(info.rtt);
     b.struct_new_with_rtt(info.struct);
@@ -115,7 +130,7 @@ class ConstantInstantiator extends ConstantVisitor<void> {
   void visitInstanceConstant(InstanceConstant constant) {
     ClassInfo info = translator.classInfo[constant.classNode]!;
     w.RefType type = w.RefType.def(info.struct, nullable: false);
-    instantiateLazyConstant(constant, type, (b) {
+    instantiateLazyConstant(constant, type, (function) {
       int fieldCount = constant.fieldValues.length;
       assert(info.struct.fields.length == 1 + fieldCount);
       List<Constant?> subConstants = List.filled(1 + fieldCount, null);
@@ -125,10 +140,46 @@ class ConstantInstantiator extends ConstantVisitor<void> {
         subConstants[fieldIndex] = subConstant;
       });
 
+      w.Instructions b = function.body;
       b.i32_const(info.classId);
       for (int i = 1; i <= fieldCount; i++) {
         constants.instantiateConstant(
-            b, subConstants[i]!, info.struct.fields[i].type.unpacked);
+            function, subConstants[i]!, info.struct.fields[i].type.unpacked);
+      }
+      b.global_get(info.rtt);
+      b.struct_new_with_rtt(info.struct);
+    });
+  }
+
+  void visitListConstant(ListConstant constant) {
+    // TODO: Use unmodifiable list
+    ClassInfo info = translator.classInfo[translator.fixedLengthListClass]!;
+    w.RefType type = w.RefType.def(info.struct, nullable: false);
+    instantiateLazyConstant(constant, type, (function) {
+      w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
+      w.ArrayType arrayType =
+          (refType.heapType as w.DefHeapType).def as w.ArrayType;
+      w.ValueType elementType = arrayType.elementType.type.unpacked;
+      int length = constant.entries.length;
+      w.Local arrayLocal = function.addLocal(
+          refType.withNullability(!translator.options.localNullability));
+      w.Instructions b = function.body;
+      b.i32_const(info.classId);
+      b.i64_const(length);
+      b.i32_const(length);
+      b.rtt_canon(arrayType);
+      b.array_new_default_with_rtt(arrayType);
+      b.local_set(arrayLocal);
+      for (int i = 0; i < length; i++) {
+        b.local_get(arrayLocal);
+        b.i32_const(i);
+        constants.instantiateConstant(
+            function, constant.entries[i], elementType);
+        b.array_set(arrayType);
+      }
+      b.local_get(arrayLocal);
+      if (arrayLocal.type.nullable) {
+        b.ref_as_non_null();
       }
       b.global_get(info.rtt);
       b.struct_new_with_rtt(info.struct);

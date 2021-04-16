@@ -262,6 +262,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitEmptyStatement(EmptyStatement node) {}
 
+  void visitAssertStatement(AssertStatement node) {}
+
   void visitExpressionStatement(ExpressionStatement node) {
     wrap(node.expression);
   }
@@ -716,7 +718,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     for (int i = node.positional.length; i < paramInfo.positional.length; i++) {
       final w.ValueType type = signature.inputs[signatureOffset + i];
       translator.constants
-          .instantiateConstant(b, paramInfo.positional[i]!, type);
+          .instantiateConstant(function, paramInfo.positional[i]!, type);
     }
     // Named arguments
     final Map<String, w.Local> namedLocals = {};
@@ -738,7 +740,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
         });
       } else {
         translator.constants
-            .instantiateConstant(b, paramInfo.named[name]!, type);
+            .instantiateConstant(function, paramInfo.named[name]!, type);
       }
     }
   }
@@ -763,17 +765,17 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitConstantExpression(ConstantExpression node) {
     translator.constants.instantiateConstant(
-        b, node.constant, bodyAnalyzer.expressionType[node]);
+        function, node.constant, bodyAnalyzer.expressionType[node]);
   }
 
   void visitNullLiteral(NullLiteral node) {
     translator.constants.instantiateConstant(
-        b, NullConstant(), bodyAnalyzer.expressionType[node]);
+        function, NullConstant(), bodyAnalyzer.expressionType[node]);
   }
 
   void visitStringLiteral(StringLiteral node) {
     translator.constants
-        .instantiateConstant(b, StringConstant(node.value), null);
+        .instantiateConstant(function, StringConstant(node.value), null);
   }
 
   void visitBoolLiteral(BoolLiteral node) {

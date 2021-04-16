@@ -51,6 +51,7 @@ class Translator {
   late final Class boxedIntClass;
   late final Class boxedDoubleClass;
   late final Class functionClass;
+  late final Class fixedLengthListClass;
   late final Map<Class, w.StorageType> builtinTypes;
   late final Map<w.ValueType, Class> boxedClasses;
 
@@ -101,6 +102,7 @@ class Translator {
     boxedIntClass = lookupCore("_BoxedInt");
     boxedDoubleClass = lookupCore("_BoxedDouble");
     functionClass = lookupCore("_Function");
+    fixedLengthListClass = lookupCore("_List");
     builtinTypes = {
       coreTypes.boolClass: w.NumType.i32,
       coreTypes.intClass: w.NumType.i64,
@@ -185,10 +187,17 @@ class Translator {
           Lambda lambda = codeGen.pendingLambdas.removeLast();
           codeGen.generateLambda(lambda);
           if (options.printWasm) {
-            print("#${lambda.function.index}");
+            print("#${lambda.function.index}: $exportName (closure)");
             print(lambda.function.body.trace);
           }
         }
+      }
+    }
+
+    if (options.printWasm) {
+      for (ConstantInfo info in constants.constantInfo.values) {
+        print("#${info.function.index}: ${info.constant}");
+        print(info.function.body.trace);
       }
     }
 

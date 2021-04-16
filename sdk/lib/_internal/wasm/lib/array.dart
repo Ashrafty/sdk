@@ -4,7 +4,7 @@
 
 // part of "core_patch.dart";
 
-@pragma("vm:entry-point")
+@pragma("wasm:entry-point")
 abstract class _ListBase<E> extends ListBase<E> {
   int _length;
   WasmObjectArray<Object?> _data;
@@ -118,7 +118,7 @@ abstract class _ListBase<E> extends ListBase<E> {
   }
 }
 
-@pragma("vm:entry-point")
+@pragma("wasm:entry-point")
 class _List<E> extends _ListBase<E> with FixedLengthListMixin<E> {
   _List._(int length) : super(length, length);
 

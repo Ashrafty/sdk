@@ -117,6 +117,8 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   visitEmptyStatement(EmptyStatement node) => voidMarker;
 
+  visitAssertStatement(AssertStatement node) => voidMarker;
+
   visitWhileStatement(WhileStatement node) {
     wrapExpression(node.condition, w.NumType.i32);
     node.body.accept(this);

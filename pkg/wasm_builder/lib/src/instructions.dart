@@ -474,6 +474,7 @@ class Instructions with SerializerMixin {
         const [RefType.any()], [_topOfStack.withNullability(false)],
         trace: ['br_on_null', label]));
     assert(_verifyBranchTypes(label, 1));
+    label.markJump();
     writeByte(0xD4);
     _writeLabel(label);
   }
@@ -690,6 +691,7 @@ class Instructions with SerializerMixin {
     }, trace: ['br_on_cast', label]));
     assert(_verifyBranchTypes(
         label, 1, [RefType.def(targetType, nullable: false)]));
+    label.markJump();
     writeBytes(const [0xFB, 0x42]);
     _writeLabel(label);
   }
@@ -737,6 +739,7 @@ class Instructions with SerializerMixin {
     assert(_verifyTypes(const [RefType.any()], [_topOfStack],
         trace: ['br_on_func', label]));
     assert(_verifyBranchTypes(label, 1, const [RefType.func(nullable: false)]));
+    label.markJump();
     writeBytes(const [0xFB, 0x60]);
     _writeLabel(label);
   }
@@ -745,6 +748,7 @@ class Instructions with SerializerMixin {
     assert(_verifyTypes(const [RefType.any()], [_topOfStack],
         trace: ['br_on_data', label]));
     assert(_verifyBranchTypes(label, 1, const [RefType.data(nullable: false)]));
+    label.markJump();
     writeBytes(const [0xFB, 0x61]);
     _writeLabel(label);
   }
@@ -753,6 +757,7 @@ class Instructions with SerializerMixin {
     assert(_verifyTypes(const [RefType.any()], [_topOfStack],
         trace: ['br_on_i31', label]));
     assert(_verifyBranchTypes(label, 1, const [RefType.i31(nullable: false)]));
+    label.markJump();
     writeBytes(const [0xFB, 0x62]);
     _writeLabel(label);
   }
