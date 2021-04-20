@@ -43,6 +43,7 @@ import 'package:vm/transformations/type_flow/analysis.dart';
 import 'package:vm/transformations/type_flow/calls.dart' show DirectSelector;
 import 'package:vm/transformations/lowering.dart' as lowering
     show transformLibraries, transformProcedure;
+import 'package:vm/transformations/type_flow/signature_shaking.dart';
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 import 'package:vm/transformations/type_flow/transformer.dart' show TreeShaker;
 
@@ -243,6 +244,10 @@ main(List<String> args) async {
   treeShaker.transformComponent(component);
 
   final tableSelectorAssigner = new TableSelectorAssigner(component);
+
+  final signatureShaker =
+      new SignatureShaker(typeFlowAnalysis, tableSelectorAssigner);
+  signatureShaker.transformComponent(component);
 
   var translator = Translator(
       component,
