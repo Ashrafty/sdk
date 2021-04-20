@@ -4,6 +4,7 @@
 
 import 'package:dart2wasm/body_analyzer.dart';
 import 'package:dart2wasm/class_info.dart';
+import 'package:dart2wasm/closures.dart';
 import 'package:dart2wasm/dispatch_table.dart';
 import 'package:dart2wasm/param_info.dart';
 import 'package:dart2wasm/translator.dart';
@@ -34,6 +35,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   late w.ValueType returnType;
 
   late BodyAnalyzer bodyAnalyzer;
+  late Closures closures;
 
   Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
@@ -107,6 +109,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       return;
     }
 
+    locals.clear();
     ParameterInfo paramInfo = translator.paramInfoFor(reference);
     int implicitParams =
         member.isInstanceMember || member is Constructor ? 1 : 0;
@@ -121,6 +124,9 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       locals[param] =
           paramLocals[implicitParams + paramInfo.nameIndex[param.name]!];
     }
+
+    closures = Closures(this);
+    closures.findCaptures(member.function!);
 
     bodyAnalyzer = BodyAnalyzer(this);
     bodyAnalyzer.analyzeMember(member);
@@ -155,6 +161,11 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     } else {
       thisLocal = null;
     }
+
+    closures.buildContexts(member.function!);
+    allocateContext(member.function!);
+    captureParameters();
+
     member.function!.body!.accept(this);
     b.end();
   }
@@ -165,6 +176,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     paramLocals = function.locals;
     returnType = function.type.outputs.single;
 
+    locals.clear();
     final int implicitParams = 1;
     List<VariableDeclaration> positional =
         lambda.expression.function.positionalParameters;
@@ -172,11 +184,74 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       locals[positional[i]] = paramLocals[implicitParams + i];
     }
 
+    Context? context = closures.contexts[lambda.expression.function]?.parent;
+    if (context != null) {
+      b.local_get(function.locals[0]);
+      b.rtt_canon(context.struct);
+      b.ref_cast();
+      while (true) {
+        w.Local contextLocal = function.addLocal(
+            typeForLocal(w.RefType.def(context!.struct, nullable: false)));
+        context.currentLocal = contextLocal;
+        if (context.parent != null || context.containsThis) {
+          b.local_tee(contextLocal);
+        } else {
+          b.local_set(contextLocal);
+        }
+        if (context.parent == null) break;
+
+        b.struct_get(context.struct, context.parentFieldIndex);
+        context = context.parent!;
+      }
+      if (context.containsThis) {
+        thisLocal = function.addLocal(typeForLocal(
+            context.struct.fields[context.thisFieldIndex].type.unpacked));
+        b.struct_get(context.struct, context.thisFieldIndex);
+        b.local_set(thisLocal!);
+      }
+    }
+    allocateContext(lambda.expression.function);
+    captureParameters();
+
     lambda.expression.function.body!.accept(this);
     if (lambda.expression.function.returnType is VoidType) {
       b.ref_null(w.HeapType.def(object.struct));
     }
     b.end();
+  }
+
+  void allocateContext(TreeNode node) {
+    Context? context = closures.contexts[node];
+    if (context != null && !context.isEmpty) {
+      w.Local contextLocal = function.addLocal(
+          typeForLocal(w.RefType.def(context.struct, nullable: false)));
+      context.currentLocal = contextLocal;
+      b.rtt_canon(context.struct);
+      b.struct_new_default_with_rtt(context.struct);
+      b.local_set(contextLocal);
+      if (context.containsThis) {
+        b.local_get(contextLocal);
+        b.local_get(thisLocal!);
+        b.struct_set(context.struct, context.thisFieldIndex);
+      }
+      if (context.parent != null) {
+        w.Local parentLocal = context.parent!.currentLocal;
+        b.local_get(contextLocal);
+        b.local_get(parentLocal);
+        b.struct_set(context.struct, context.parentFieldIndex);
+      }
+    }
+  }
+
+  void captureParameters() {
+    locals.forEach((variable, local) {
+      Capture? capture = closures.captures[variable];
+      if (capture != null) {
+        b.local_get(capture.context.currentLocal);
+        b.local_get(local);
+        b.struct_set(capture.context.struct, capture.fieldIndex);
+      }
+    });
   }
 
   void wrap(TreeNode node) {
@@ -252,11 +327,24 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitVariableDeclaration(VariableDeclaration node) {
     w.ValueType type = translateType(node.type);
-    w.Local local = function.addLocal(typeForLocal(type));
-    locals[node] = local;
+    w.Local? local;
+    Capture? capture = closures.captures[node];
+    if (capture == null || !capture.written) {
+      local = function.addLocal(typeForLocal(type));
+      locals[node] = local;
+    }
     if (node.initializer != null) {
-      wrap(node.initializer!);
-      b.local_set(local);
+      if (capture != null) {
+        b.local_get(capture.context.currentLocal);
+        wrap(node.initializer!);
+        if (!capture.written) {
+          b.local_tee(local!);
+        }
+        b.struct_set(capture.context.struct, capture.fieldIndex);
+      } else {
+        wrap(node.initializer!);
+        b.local_set(local!);
+      }
     }
   }
 
@@ -340,6 +428,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitDoStatement(DoStatement node) {
     w.Label loop = b.loop();
+    allocateContext(node);
     wrap(node.body);
     _branchIf(node.condition, loop, negated: false);
     b.end();
@@ -349,6 +438,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     w.Label block = b.block();
     w.Label loop = b.loop();
     _branchIf(node.condition, block, negated: true);
+    allocateContext(node);
     wrap(node.body);
     b.br(loop);
     b.end();
@@ -356,11 +446,29 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   void visitForStatement(ForStatement node) {
+    Context? context = closures.contexts[node];
+    allocateContext(node);
     visitList(node.variables, this);
     w.Label block = b.block();
     w.Label loop = b.loop();
     _branchIf(node.condition, block, negated: true);
     node.body.accept(this);
+    if (node.variables.any((v) => closures.captures.containsKey(v))) {
+      w.Local oldContext = context!.currentLocal;
+      allocateContext(node);
+      w.Local newContext = context.currentLocal;
+      for (VariableDeclaration variable in node.variables) {
+        Capture? capture = closures.captures[variable];
+        if (capture != null) {
+          b.local_get(oldContext);
+          b.struct_get(context.struct, capture.fieldIndex);
+          b.local_get(newContext);
+          b.struct_set(context.struct, capture.fieldIndex);
+        }
+      }
+    } else {
+      allocateContext(node);
+    }
     for (Expression update in node.updates) {
       wrap(update);
     }
@@ -541,23 +649,50 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   @override
   void visitVariableGet(VariableGet node) {
     w.Local? local = locals[node.variable];
-    if (local == null) {
-      throw "Read of undefined variable $node";
+    Capture? capture = closures.captures[node.variable];
+    if (capture != null) {
+      if (!capture.written && local != null) {
+        b.local_get(local);
+      } else {
+        b.local_get(capture.context.currentLocal);
+        b.struct_get(capture.context.struct, capture.fieldIndex);
+      }
+    } else {
+      if (local == null) {
+        throw "Read of undefined variable ${node.variable}";
+      }
+      b.local_get(local);
     }
-    b.local_get(local);
   }
 
   @override
   void visitVariableSet(VariableSet node) {
     w.Local? local = locals[node.variable];
-    if (local == null) {
-      throw "Read of undefined variable $node";
-    }
-    wrap(node.value);
-    if (bodyAnalyzer.preserved.contains(node)) {
-      b.local_tee(local);
+    Capture? capture = closures.captures[node.variable];
+    bool preserved = bodyAnalyzer.preserved.contains(node);
+    if (capture != null) {
+      assert(capture.written);
+      b.local_get(capture.context.currentLocal);
+      wrap(node.value);
+      if (preserved) {
+        w.Local temp =
+            function.addLocal(typeForLocal(translateType(node.variable.type)));
+        b.local_tee(temp);
+        b.struct_set(capture.context.struct, capture.fieldIndex);
+        b.local_get(temp);
+      } else {
+        b.struct_set(capture.context.struct, capture.fieldIndex);
+      }
     } else {
-      b.local_set(local);
+      if (local == null) {
+        throw "Write of undefined variable ${node.variable}";
+      }
+      wrap(node.value);
+      if (preserved) {
+        b.local_tee(local);
+      } else {
+        b.local_set(local);
+      }
     }
   }
 
@@ -663,10 +798,19 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     w.StructType struct = translator.functionStructType(parameterCount);
     w.DefinedGlobal rtt = translator.functionTypeRtt[parameterCount]!;
 
+    Context? context = closures.contexts[node.function]?.parent;
+
     b.i32_const(info.classId);
-    // TODO: Use actual context
-    b.rtt_canon(translator.dummyContext);
-    b.struct_new_with_rtt(translator.dummyContext);
+    if (context != null) {
+      b.local_get(context.currentLocal);
+      if (context.currentLocal.type.nullable) {
+        b.ref_as_non_null();
+      }
+    } else {
+      // TODO: Put dummy context in global variable
+      b.rtt_canon(translator.dummyContext);
+      b.struct_new_with_rtt(translator.dummyContext);
+    }
     b.global_get(global);
     b.global_get(rtt);
     b.struct_new_with_rtt(struct);

@@ -177,7 +177,11 @@ class BodyAnalyzer extends Visitor<w.ValueType>
         return objectType;
       }
       assert(variableParent.parent == codeGen.member);
-      return codeGen.locals[node.variable]!.type;
+      w.ValueType type = codeGen.locals[node.variable]!.type;
+      if (codeGen.closures.captures.containsKey(node.variable)) {
+        type = type.withNullability(true);
+      }
+      return type;
     }
     return typeForLocal(translateType(node.variable.type));
     // TODO: Create and set promoted local to be able to use promoted type.
