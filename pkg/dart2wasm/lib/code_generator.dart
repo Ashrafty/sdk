@@ -167,6 +167,14 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     captureParameters();
 
     member.function!.body!.accept(this);
+
+    if (function.type.outputs.length > 0) {
+      w.ValueType returnType = function.type.outputs[0];
+      if (returnType is w.RefType && returnType.nullable) {
+        // Dart body may have an implicit return null.
+        b.ref_null(returnType.heapType);
+      }
+    }
     b.end();
   }
 
