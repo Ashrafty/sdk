@@ -352,7 +352,7 @@ abstract class ClassHierarchySubtypes {
   /// target, or `null` if it could not be resolved or there are multiple
   /// possible targets.
   Member? getSingleTargetForInterfaceInvocation(Member interfaceTarget,
-      {bool setter: false, Class? receiverClass});
+      {bool setter: false});
 }
 
 class _ClassInfoSubtype {
@@ -415,12 +415,11 @@ class _ClosedWorldClassHierarchySubtypes implements ClassHierarchySubtypes {
 
   @override
   Member? getSingleTargetForInterfaceInvocation(Member interfaceTarget,
-      {bool setter: false, Class? receiverClass}) {
+      {bool setter: false}) {
     if (invalidated) throw "This data structure has been invalidated";
     Name name = interfaceTarget.name;
     Member? target = null;
-    ClassSet subtypes =
-        getSubtypesOf(receiverClass ?? interfaceTarget.enclosingClass!);
+    ClassSet subtypes = getSubtypesOf(interfaceTarget.enclosingClass!);
     for (Class c in subtypes) {
       if (!c.isAbstract) {
         Member? candidate =

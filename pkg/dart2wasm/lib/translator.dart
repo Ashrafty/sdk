@@ -16,6 +16,7 @@ import 'package:kernel/class_hierarchy.dart'
 import 'package:kernel/core_types.dart';
 import 'package:kernel/src/printer.dart';
 import 'package:kernel/type_environment.dart';
+import 'package:vm/metadata/direct_call.dart';
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
@@ -417,14 +418,11 @@ class Translator {
     }
   }
 
-  Member? singleTarget(Member interfaceTarget, DartType receiverType,
-      {required bool setter}) {
-    while (receiverType is TypeParameterType) receiverType = receiverType.bound;
-    Class receiverClass = receiverType is InterfaceType
-        ? receiverType.classNode
-        : coreTypes.objectClass;
-    return subtypes.getSingleTargetForInterfaceInvocation(interfaceTarget,
-        receiverClass: receiverClass, setter: setter);
+  Member? singleTarget(TreeNode node) {
+    DirectCallMetadataRepository metadata =
+        component.metadata[DirectCallMetadataRepository.repositoryTag]
+            as DirectCallMetadataRepository;
+    return metadata.mapping[node]?.target;
   }
 
   bool shouldInline(Reference target) {

@@ -243,9 +243,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitInstanceGet(InstanceGet node) {
-    Member? singleTarget = translator.singleTarget(
-        node.interfaceTarget, node.receiver.getStaticType(codeGen.typeContext),
-        setter: false);
+    Member? singleTarget = translator.singleTarget(node);
     w.ValueType receiverType;
     w.ValueType resultType;
     if (singleTarget is Field) {
@@ -273,9 +271,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   w.ValueType visitInstanceSet(InstanceSet node) {
     w.ValueType expectedType = this.expectedType;
-    Member? singleTarget = translator.singleTarget(
-        node.interfaceTarget, node.receiver.getStaticType(codeGen.typeContext),
-        setter: false);
+    Member? singleTarget = translator.singleTarget(node);
     w.ValueType receiverType;
     w.ValueType valueType;
     if (singleTarget is Field) {

@@ -45,7 +45,8 @@ import 'package:vm/transformations/lowering.dart' as lowering
     show transformLibraries, transformProcedure;
 import 'package:vm/transformations/type_flow/signature_shaking.dart';
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
-import 'package:vm/transformations/type_flow/transformer.dart' show TreeShaker;
+import 'package:vm/transformations/type_flow/transformer.dart'
+    show TFADevirtualization, TreeShaker;
 
 import 'package:dart2wasm/transformers.dart' as wasmTrans;
 import 'package:dart2wasm/translator.dart';
@@ -242,6 +243,10 @@ main(List<String> args) async {
   final treeShaker =
       TreeShaker(component, typeFlowAnalysis, treeShakeWriteOnlyFields: false);
   treeShaker.transformComponent(component);
+
+  final devirtualization = new TFADevirtualization(
+      component, typeFlowAnalysis, hierarchy, treeShaker.fieldMorpher);
+  devirtualization.visitComponent(component);
 
   final tableSelectorAssigner = new TableSelectorAssigner(component);
 

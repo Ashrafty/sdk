@@ -545,9 +545,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   void visitInstanceInvocation(InstanceInvocation node) {
     Procedure target = node.interfaceTarget;
     wrap(node.receiver);
-    Member? singleTarget = translator.singleTarget(
-        node.interfaceTarget, node.receiver.getStaticType(typeContext),
-        setter: false);
+    Member? singleTarget = translator.singleTarget(node);
     if (singleTarget != null) {
       _visitArguments(node.arguments, node.interfaceTargetReference, 1);
       _call(singleTarget.reference);
@@ -741,9 +739,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   @override
   void visitInstanceGet(InstanceGet node) {
     wrap(node.receiver);
-    Member? singleTarget = translator.singleTarget(
-        node.interfaceTarget, node.receiver.getStaticType(typeContext),
-        setter: false);
+    Member? singleTarget = translator.singleTarget(node);
     if (singleTarget != null) {
       if (singleTarget is Field) {
         w.StructType struct =
@@ -767,9 +763,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
         ? function
             .addLocal(translateType(node.value.getStaticType(typeContext)))
         : null;
-    Member? singleTarget = translator.singleTarget(
-        node.interfaceTarget, node.receiver.getStaticType(typeContext),
-        setter: true);
+    Member? singleTarget = translator.singleTarget(node);
     if (singleTarget != null) {
       wrap(node.value);
       if (preserved) b.local_tee(temp!);
