@@ -46,7 +46,8 @@ import 'package:vm/transformations/lowering.dart' as lowering
 import 'package:vm/transformations/type_flow/signature_shaking.dart';
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 import 'package:vm/transformations/type_flow/transformer.dart'
-    show TFADevirtualization, TreeShaker;
+    show AnnotateKernel, TFADevirtualization, TreeShaker;
+import 'package:vm/transformations/type_flow/unboxing_info.dart';
 
 import 'package:dart2wasm/transformers.dart' as wasmTrans;
 import 'package:dart2wasm/translator.dart';
@@ -253,6 +254,14 @@ main(List<String> args) async {
   final signatureShaker =
       new SignatureShaker(typeFlowAnalysis, tableSelectorAssigner);
   signatureShaker.transformComponent(component);
+
+  // Not used but needed by AnnotateKernel
+  final unboxingInfo = new UnboxingInfoManager(typeFlowAnalysis)
+    ..analyzeComponent(component, typeFlowAnalysis, tableSelectorAssigner);
+
+  new AnnotateKernel(component, typeFlowAnalysis, treeShaker.fieldMorpher,
+          tableSelectorAssigner, unboxingInfo)
+      .visitComponent(component);
 
   var translator = Translator(
       component,

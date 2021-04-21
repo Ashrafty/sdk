@@ -10,10 +10,13 @@ import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
 
+import 'package:vm/metadata/table_selector.dart';
+
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class SelectorInfo {
   final int id;
+  final int callCount;
   final ParameterInfo paramInfo;
   int returnCount;
 
@@ -23,16 +26,18 @@ class SelectorInfo {
 
   String get name => paramInfo.member.name.text;
 
-  SelectorInfo(this.id, this.paramInfo, this.returnCount);
+  SelectorInfo(this.id, this.callCount, this.paramInfo, this.returnCount);
 }
 
 class DispatchTable {
-  Translator translator;
+  final Translator translator;
+  final List<TableSelectorInfo> selectorMetadata;
 
   Map<int, SelectorInfo> selectorInfo = {};
   late List<Reference?> table;
 
-  DispatchTable(this.translator);
+  DispatchTable(this.translator)
+      : selectorMetadata = translator.tableSelectorAssigner.metadata.selectors;
 
   SelectorInfo selectorForTarget(Reference target) {
     // TODO: Tearoffs
@@ -47,7 +52,9 @@ class DispatchTable {
         ? 1
         : 0;
     var selector = selectorInfo.putIfAbsent(
-        selectorId, () => SelectorInfo(selectorId, paramInfo, returnCount));
+        selectorId,
+        () => SelectorInfo(selectorId, selectorMetadata[selectorId].callCount,
+            paramInfo, returnCount));
     selector.paramInfo.merge(paramInfo);
     selector.returnCount = max(selector.returnCount, returnCount);
     return selector;
@@ -171,13 +178,15 @@ class DispatchTable {
     // Quick and wasteful offset assignment
     int nextAvailable = 0;
     for (SelectorInfo selector in selectorInfo.values) {
-      List<int> classIds = selector.classes.keys
-          .where((id) => !translator.classes[id].cls.isAbstract)
-          .toList()
-            ..sort();
-      if (classIds.isNotEmpty) {
-        selector.offset = nextAvailable - classIds.first;
-        nextAvailable += classIds.last - classIds.first + 1;
+      if (selector.callCount > 0) {
+        List<int> classIds = selector.classes.keys
+            .where((id) => !translator.classes[id].cls.isAbstract)
+            .toList()
+              ..sort();
+        if (classIds.isNotEmpty) {
+          selector.offset = nextAvailable - classIds.first;
+          nextAvailable += classIds.last - classIds.first + 1;
+        }
       }
     }
     //print("Dispatch table size: $nextAvailable");
@@ -185,10 +194,12 @@ class DispatchTable {
     // Fill table
     table = List.filled(nextAvailable, null);
     for (SelectorInfo selector in selectorInfo.values) {
-      for (int classId in selector.classes.keys) {
-        if (!translator.classes[classId].cls.isAbstract) {
-          assert(table[selector.offset + classId] == null);
-          table[selector.offset + classId] = selector.classes[classId];
+      if (selector.callCount > 0) {
+        for (int classId in selector.classes.keys) {
+          if (!translator.classes[classId].cls.isAbstract) {
+            assert(table[selector.offset + classId] == null);
+            table[selector.offset + classId] = selector.classes[classId];
+          }
         }
       }
     }
