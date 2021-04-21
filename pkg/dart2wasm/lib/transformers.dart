@@ -82,7 +82,7 @@ class _WasmTransformer extends Transformer {
         initializer: InstanceGet(
             InstanceAccessKind.Instance, iterable, Name('iterator'),
             interfaceTarget: coreTypes.iterableGetIterator,
-            resultType: coreTypes.iterableGetIterator.function!.returnType)
+            resultType: coreTypes.iterableGetIterator.function.returnType)
           ..fileOffset = iterable.fileOffset,
         type: iteratorType)
       ..fileOffset = iterable.fileOffset;
@@ -90,7 +90,7 @@ class _WasmTransformer extends Transformer {
     final condition = InstanceInvocation(InstanceAccessKind.Instance,
         VariableGet(iterator), Name('moveNext'), Arguments([]),
         interfaceTarget: coreTypes.iteratorMoveNext,
-        functionType: coreTypes.iteratorMoveNext.function!
+        functionType: coreTypes.iteratorMoveNext.function
             .computeFunctionType(Nullability.nonNullable))
       ..fileOffset = iterable.fileOffset;
 
@@ -98,7 +98,7 @@ class _WasmTransformer extends Transformer {
       ..initializer = (InstanceGet(
           InstanceAccessKind.Instance, VariableGet(iterator), Name('current'),
           interfaceTarget: coreTypes.iteratorGetCurrent,
-          resultType: coreTypes.iteratorGetCurrent.function!.returnType)
+          resultType: coreTypes.iteratorGetCurrent.function.returnType)
         ..fileOffset = stmt.bodyOffset);
 
     final Block body = Block([variable, stmt.body]);

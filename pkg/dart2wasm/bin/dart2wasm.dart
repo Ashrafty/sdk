@@ -225,7 +225,7 @@ main(List<String> args) async {
       .procedures
       .firstWhere((p) => p.name.text == "print");
   printMember.isExternal = true;
-  printMember.function!.body = null;
+  printMember.function.body = null;
 
   final hierarchy = compilerResult.classHierarchy as ClosedWorldClassHierarchy;
   final typeFlowAnalysis = TypeFlowAnalysis(

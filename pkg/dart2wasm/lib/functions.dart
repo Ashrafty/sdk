@@ -60,7 +60,7 @@ class FunctionCollector extends MemberVisitor<void> {
           String module = externalName.substring(0, dot);
           String name = externalName.substring(dot + 1);
           w.FunctionType ftype = _makeFunctionType(
-              node.reference, node.function!.returnType, null,
+              node.reference, node.function.returnType, null,
               getter: node.isGetter);
           translator.functions[node.reference] =
               m.importFunction(module, name, ftype);
@@ -75,7 +75,7 @@ class FunctionCollector extends MemberVisitor<void> {
             .selectorForTarget(node.reference)
             .signature);
       } else {
-        _makeFunction(node.reference, node.function!.returnType, null,
+        _makeFunction(node.reference, node.function.returnType, null,
             getter: node.isGetter);
       }
     }

@@ -157,7 +157,7 @@ class FindCaptures extends RecursiveVisitor {
     // Variable is in outer scope
     node.variable.accept(this);
     depth++;
-    node.function!.accept(this);
+    node.function.accept(this);
     depth--;
   }
 }

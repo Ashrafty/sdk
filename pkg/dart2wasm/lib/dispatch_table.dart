@@ -48,7 +48,7 @@ class DispatchTable {
         : translator.tableSelectorAssigner.methodOrSetterSelectorId(member);
     ParameterInfo paramInfo = ParameterInfo.fromMember(target);
     int returnCount = isGetter ||
-            member is Procedure && member.function!.returnType is! VoidType
+            member is Procedure && member.function.returnType is! VoidType
         ? 1
         : 0;
     var selector = selectorInfo.putIfAbsent(
