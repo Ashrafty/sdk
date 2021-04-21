@@ -150,6 +150,11 @@ class Translator {
 
     mainFunction =
         libraries.first.procedures.firstWhere((p) => p.name.text == "main");
+    var mainReturns = functions[mainFunction.reference]!.type.outputs;
+    if (mainReturns.any((t) => t is w.RefType)) {
+      print(
+          "Warning: main returns a reference type. JS embedding may complain.");
+    }
 
     var codeGen = CodeGenerator(this);
     for (Reference reference in functions.keys) {
