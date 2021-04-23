@@ -10,6 +10,13 @@ import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+class Lambda {
+  FunctionNode functionNode;
+  w.DefinedFunction function;
+
+  Lambda(this.functionNode, this.function);
+}
+
 class Context {
   final TreeNode owner;
   final Context? parent;
@@ -47,7 +54,9 @@ class Closures {
   final CodeGenerator codeGen;
   Map<VariableDeclaration, Capture> captures = {};
   bool isThisCaptured = false;
+  Map<FunctionNode, Lambda> lambdas = {};
   Map<TreeNode, Context> contexts = {};
+  Set<FunctionDeclaration> closurizedFunctions = {};
 
   Closures(this.codeGen);
 
@@ -101,6 +110,11 @@ class FindCaptures extends RecursiveVisitor {
 
   FindCaptures(this.closures);
 
+  Translator get translator => closures.translator;
+
+  @override
+  void visitAssertStatement(AssertStatement node) {}
+
   @override
   void visitVariableDeclaration(VariableDeclaration node) {
     if (depth > 0) {
@@ -114,6 +128,8 @@ class FindCaptures extends RecursiveVisitor {
     assert(declDepth <= depth);
     if (declDepth < depth) {
       closures.captures[variable] = Capture(variable);
+    } else if (variable.parent is FunctionDeclaration) {
+      closures.closurizedFunctions.add(variable.parent as FunctionDeclaration);
     }
   }
 
@@ -145,20 +161,32 @@ class FindCaptures extends RecursiveVisitor {
     _visitThis();
   }
 
+  void _visitLambda(FunctionNode node) {
+    if (node.positionalParameters.length != node.requiredParameterCount ||
+        node.namedParameters.isNotEmpty) {
+      throw "Optional parameters not supported for "
+          "function expressions and local functions";
+    }
+    int parameterCount = node.requiredParameterCount;
+    w.FunctionType type = translator.functionType(parameterCount);
+    w.DefinedFunction function = translator.m.addFunction(type);
+    closures.lambdas[node] = Lambda(node, function);
+
+    depth++;
+    node.visitChildren(this);
+    depth--;
+  }
+
   @override
   void visitFunctionExpression(FunctionExpression node) {
-    depth++;
-    super.visitFunctionExpression(node);
-    depth--;
+    _visitLambda(node.function);
   }
 
   @override
   void visitFunctionDeclaration(FunctionDeclaration node) {
     // Variable is in outer scope
     node.variable.accept(this);
-    depth++;
-    node.function.accept(this);
-    depth--;
+    _visitLambda(node.function);
   }
 }
 
@@ -167,6 +195,9 @@ class BuildContexts extends RecursiveVisitor {
   Context? currentContext;
 
   BuildContexts(this.closures);
+
+  @override
+  void visitAssertStatement(AssertStatement node) {}
 
   void _newContext(TreeNode node) {
     bool outerMost = currentContext == null;

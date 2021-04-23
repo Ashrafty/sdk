@@ -165,6 +165,11 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     return voidMarker;
   }
 
+  visitFunctionDeclaration(FunctionDeclaration node) {
+    _visitLambda(node.function);
+    return voidMarker;
+  }
+
   w.ValueType defaultExpression(Expression node) {
     throw "Unsupported expression in body analyzer: $node";
   }
@@ -389,22 +394,33 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   w.ValueType visitFunctionExpression(FunctionExpression node) {
-    w.ValueType savedReturnType = returnType;
-    returnType = objectType;
-    node.function.body!.accept(this);
-    returnType = savedReturnType;
+    _visitLambda(node.function);
     return typeOfExp(node);
   }
 
-  w.ValueType visitFunctionInvocation(FunctionInvocation node) {
-    int parameterCount = node.arguments.positional.length;
-    wrapExpression(node.receiver, typeOfExp(node.receiver));
+  void _visitLambda(FunctionNode functionNode) {
+    final w.ValueType savedReturnType = returnType;
+    returnType = objectType;
+    functionNode.body!.accept(this);
+    returnType = savedReturnType;
+  }
 
-    int signatureOffset = 1;
+  w.ValueType visitFunctionInvocation(FunctionInvocation node) {
+    wrapExpression(node.receiver, typeOfExp(node.receiver));
+    return _callLambda(node.arguments);
+  }
+
+  w.ValueType visitLocalFunctionInvocation(LocalFunctionInvocation node) {
+    return _callLambda(node.arguments);
+  }
+
+  w.ValueType _callLambda(Arguments arguments) {
+    final int parameterCount = arguments.positional.length;
+    const int signatureOffset = 1;
     final w.FunctionType signature = translator.functionType(parameterCount);
-    for (int i = 0; i < node.arguments.positional.length; i++) {
+    for (int i = 0; i < arguments.positional.length; i++) {
       final int index = signatureOffset + i;
-      wrapExpression(node.arguments.positional[i], signature.inputs[index]);
+      wrapExpression(arguments.positional[i], signature.inputs[index]);
     }
 
     return signature.outputs.single;

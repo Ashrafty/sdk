@@ -15,14 +15,6 @@ import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
-class Lambda {
-  FunctionExpression expression;
-  w.DefinedFunction function;
-  w.DefinedGlobal global;
-
-  Lambda(this.expression, this.function, this.global);
-}
-
 class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   Translator translator;
   w.ValueType voidMarker;
@@ -40,8 +32,6 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
   late w.Instructions b;
-
-  List<Lambda> pendingLambdas = [];
 
   CodeGenerator(this.translator) : voidMarker = translator.voidMarker;
 
@@ -74,6 +64,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     this.returnLabel = returnLabel;
     returnType = translator
         .outputOrVoid(returnLabel?.targetTypes ?? function.type.outputs);
+
+    closures = Closures(this);
 
     if (member is Field) {
       // Implicit getter or setter
@@ -125,7 +117,6 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
           paramLocals[implicitParams + paramInfo.nameIndex[param.name]!];
     }
 
-    closures = Closures(this);
     closures.findCaptures(member.function!);
 
     bodyAnalyzer = BodyAnalyzer(this);
@@ -187,12 +178,12 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     locals.clear();
     final int implicitParams = 1;
     List<VariableDeclaration> positional =
-        lambda.expression.function.positionalParameters;
+        lambda.functionNode.positionalParameters;
     for (int i = 0; i < positional.length; i++) {
       locals[positional[i]] = paramLocals[implicitParams + i];
     }
 
-    Context? context = closures.contexts[lambda.expression.function]?.parent;
+    Context? context = closures.contexts[lambda.functionNode]?.parent;
     if (context != null) {
       b.local_get(function.locals[0]);
       b.rtt_canon(context.struct);
@@ -218,11 +209,11 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
         b.local_set(thisLocal!);
       }
     }
-    allocateContext(lambda.expression.function);
+    allocateContext(lambda.functionNode);
     captureParameters();
 
-    lambda.expression.function.body!.accept(this);
-    if (lambda.expression.function.returnType is VoidType) {
+    lambda.functionNode.body!.accept(this);
+    if (lambda.functionNode.returnType is VoidType) {
       b.ref_null(w.HeapType.def(object.struct));
     }
     b.end();
@@ -785,24 +776,55 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   }
 
   @override
+  void visitFunctionDeclaration(FunctionDeclaration node) {
+    Capture? capture = closures.captures[node.variable];
+    bool locallyClosurized = closures.closurizedFunctions.contains(node);
+    if (capture != null || locallyClosurized) {
+      if (capture != null) {
+        b.local_get(capture.context.currentLocal);
+      }
+      w.StructType struct = _instantiateClosure(node.function);
+      if (locallyClosurized) {
+        w.Local local = function
+            .addLocal(typeForLocal(w.RefType.def(struct, nullable: false)));
+        locals[node.variable] = local;
+        if (capture != null) {
+          b.local_tee(local);
+        } else {
+          b.local_set(local);
+        }
+      }
+      if (capture != null) {
+        b.struct_set(capture.context.struct, capture.fieldIndex);
+      }
+    }
+  }
+
+  @override
   void visitFunctionExpression(FunctionExpression node) {
-    int parameterCount = node.function.requiredParameterCount;
-    w.FunctionType type = translator.functionType(parameterCount);
-    w.DefinedFunction function = translator.m.addFunction(type);
-    // TODO: Why is it necessary to make a global?
-    w.DefinedGlobal global = translator.m.addGlobal(
-        w.GlobalType(w.RefType.def(type, nullable: false), mutable: false));
-    global.initializer.ref_func(function);
-    global.initializer.end();
-    pendingLambdas.add(Lambda(node, function, global));
+    _instantiateClosure(node.function);
+  }
+
+  w.StructType _instantiateClosure(FunctionNode functionNode) {
+    int parameterCount = functionNode.requiredParameterCount;
+    Lambda lambda = closures.lambdas[functionNode]!;
+    w.DefinedGlobal global = translator.makeFunctionRef(lambda.function);
 
     ClassInfo info = translator.classInfo[translator.functionClass]!;
     w.StructType struct = translator.functionStructType(parameterCount);
     w.DefinedGlobal rtt = translator.functionTypeRtt[parameterCount]!;
 
-    Context? context = closures.contexts[node.function]?.parent;
-
     b.i32_const(info.classId);
+    _pushContext(functionNode);
+    b.global_get(global);
+    b.global_get(rtt);
+    b.struct_new_with_rtt(struct);
+
+    return struct;
+  }
+
+  void _pushContext(FunctionNode functionNode) {
+    Context? context = closures.contexts[functionNode]?.parent;
     if (context != null) {
       b.local_get(context.currentLocal);
       if (context.currentLocal.type.nullable) {
@@ -813,11 +835,9 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       b.rtt_canon(translator.dummyContext);
       b.struct_new_with_rtt(translator.dummyContext);
     }
-    b.global_get(global);
-    b.global_get(rtt);
-    b.struct_new_with_rtt(struct);
   }
 
+  @override
   void visitFunctionInvocation(FunctionInvocation node) {
     FunctionType functionType = node.functionType!;
     int parameterCount = functionType.requiredParameterCount;
@@ -832,6 +852,17 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.local_get(temp);
     b.struct_get(struct, 2); // Function
     b.call_ref();
+  }
+
+  @override
+  void visitLocalFunctionInvocation(LocalFunctionInvocation node) {
+    var decl = node.variable.parent as FunctionDeclaration;
+    _pushContext(decl.function);
+    for (Expression arg in node.arguments.positional) {
+      wrap(arg);
+    }
+    Lambda lambda = closures.lambdas[decl.function]!;
+    b.call(lambda.function);
   }
 
   void visitLogicalExpression(LogicalExpression node) {

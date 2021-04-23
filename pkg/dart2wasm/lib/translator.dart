@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:dart2wasm/class_info.dart';
+import 'package:dart2wasm/closures.dart';
 import 'package:dart2wasm/code_generator.dart';
 import 'package:dart2wasm/constants.dart';
 import 'package:dart2wasm/dispatch_table.dart';
@@ -75,6 +76,7 @@ class Translator {
   Map<int, w.StructType> functionTypeCache = {};
   Map<w.StructType, int> functionTypeParameterCount = {};
   Map<int, w.DefinedGlobal> functionTypeRtt = {};
+  Map<w.DefinedFunction, w.DefinedGlobal> functionRefCache = {};
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
       this.tableSelectorAssigner, this.options)
@@ -189,8 +191,7 @@ class Translator {
         codeGen.generate(reference, function);
         if (options.printWasm) print(function.body.trace);
 
-        while (codeGen.pendingLambdas.isNotEmpty) {
-          Lambda lambda = codeGen.pendingLambdas.removeLast();
+        for (Lambda lambda in codeGen.closures.lambdas.values) {
           codeGen.generateLambda(lambda);
           if (options.printWasm) {
             print("#${lambda.function.index}: $exportName (closure)");
@@ -312,6 +313,16 @@ class Translator {
 
   int parameterCountForFunctionStruct(w.HeapType heapType) {
     return functionTypeParameterCount[(heapType as w.DefHeapType).def]!;
+  }
+
+  w.DefinedGlobal makeFunctionRef(w.DefinedFunction f) {
+    return functionRefCache.putIfAbsent(f, () {
+      w.DefinedGlobal global = m.addGlobal(
+          w.GlobalType(w.RefType.def(f.type, nullable: false), mutable: false));
+      global.initializer.ref_func(f);
+      global.initializer.end();
+      return global;
+    });
   }
 
   w.ValueType typeForLocal(w.ValueType type) {
