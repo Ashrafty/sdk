@@ -234,7 +234,6 @@ class _Collect extends RecursiveVisitor {
             .isMemberReferencedFromNativeCode(member) ||
         shaker.typeFlowAnalysis.nativeCodeOracle.isRecognized(member) ||
         getExternalName(member) != null ||
-        member.isExternal /* Hack to be compatible with the print hack */ ||
         member.name.text == '==') {
       info.eligible = false;
     }

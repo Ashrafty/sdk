@@ -137,15 +137,6 @@ class Translator {
     globals = Globals(this);
     constants = Constants(this);
 
-    w.FunctionType printType = m.addFunctionType([w.NumType.i64], []);
-    w.ImportedFunction printFun = m.importFunction("console", "log", printType);
-    for (Procedure printMember in component.libraries
-        .firstWhere((l) => l.name == "dart.core")
-        .procedures
-        .where((p) => p.name.text == "print")) {
-      functions[printMember.reference] = printFun;
-    }
-
     dispatchTable.build();
     FunctionCollector(this).collect();
     dispatchTable.output();
