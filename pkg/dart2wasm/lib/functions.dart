@@ -3,99 +3,95 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:dart2wasm/translator.dart';
+import 'package:dart2wasm/dispatch_table.dart';
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/external_name.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
-class FunctionCollector extends MemberVisitor<void> {
-  Translator translator;
-  w.Module m;
-  bool importPass = false;
+class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
+  final Translator translator;
+  final Map<Reference, w.BaseFunction> _functions = {};
+  final List<Reference> pending = [];
 
-  FunctionCollector(this.translator) : m = translator.m;
+  FunctionCollector(this.translator);
 
-  void collect() {
-    do {
-      importPass = !importPass;
-      for (Library library in translator.libraries) {
-        for (Member member in library.members) {
-          member.accept(this);
-        }
-        for (Class cls in library.classes) {
-          for (Member member in cls.members) {
-            member.accept(this);
-          }
-        }
+  w.Module get m => translator.m;
+
+  void collectImports() {
+    for (Library library in translator.libraries) {
+      for (Procedure procedure in library.procedures) {
+        _import(procedure);
       }
-    } while (importPass);
-  }
-
-  void defaultMember(Member node) {}
-
-  void visitField(Field node) {
-    if (importPass) return;
-    if (node.isInstanceMember) {
-      translator.functions[node.getterReference] = m.addFunction(translator
-          .dispatchTable
-          .selectorForTarget(node.getterReference)
-          .signature);
-      if (node.hasSetter) {
-        translator.functions[node.setterReference!] = m.addFunction(translator
-            .dispatchTable
-            .selectorForTarget(node.setterReference!)
-            .signature);
+      for (Class cls in library.classes) {
+        for (Procedure procedure in cls.procedures) {
+          _import(procedure);
+        }
       }
     }
   }
 
-  void visitProcedure(Procedure node) {
-    if (importPass) {
-      String? externalName = getExternalName(node);
-      if (externalName != null) {
-        int dot = externalName.indexOf('.');
-        if (dot != -1) {
-          assert(!node.isInstanceMember);
-          String module = externalName.substring(0, dot);
-          String name = externalName.substring(dot + 1);
-          w.FunctionType ftype = _makeFunctionType(
-              node.reference, node.function.returnType, null,
-              getter: node.isGetter);
-          translator.functions[node.reference] =
-              m.importFunction(module, name, ftype);
-        }
+  void _import(Procedure procedure) {
+    String? externalName = getExternalName(procedure);
+    if (externalName != null) {
+      int dot = externalName.indexOf('.');
+      if (dot != -1) {
+        assert(!procedure.isInstanceMember);
+        String module = externalName.substring(0, dot);
+        String name = externalName.substring(dot + 1);
+        w.FunctionType ftype = _makeFunctionType(
+            procedure.reference, procedure.function.returnType, null,
+            getter: procedure.isGetter);
+        _functions[procedure.reference] = m.importFunction(module, name, ftype);
       }
-      return;
     }
-    if (!node.isAbstract && !node.isExternal) {
-      if (node.isInstanceMember) {
-        translator.functions[node.reference] = m.addFunction(translator
-            .dispatchTable
-            .selectorForTarget(node.reference)
-            .signature);
-      } else {
-        _makeFunction(node.reference, node.function.returnType, null,
+  }
+
+  w.BaseFunction? getExistingFunction(Reference target) {
+    return _functions[target];
+  }
+
+  w.BaseFunction getFunction(Reference target) {
+    return _functions.putIfAbsent(target, () {
+      pending.add(target);
+      w.FunctionType ftype = target.asMember.accept1(this, target);
+      return m.addFunction(ftype);
+    });
+  }
+
+  void activateSelector(SelectorInfo selector) {
+    for (Reference target in selector.targets.values) {
+      if (!target.asMember.isAbstract) {
+        getFunction(target);
+      }
+    }
+  }
+
+  w.FunctionType defaultMember(Member node, Reference target) {
+    throw "No Wasm function for member: $node";
+  }
+
+  w.FunctionType visitField(Field node, Reference target) {
+    if (!node.isInstanceMember) {
+      String kind = target == node.setterReference ? "setter" : "getter";
+      throw "No implicit $kind function for static field: $node";
+    }
+    return translator.dispatchTable.selectorForTarget(target).signature;
+  }
+
+  w.FunctionType visitProcedure(Procedure node, Reference target) {
+    assert(!node.isAbstract);
+    return node.isInstanceMember
+        ? translator.dispatchTable.selectorForTarget(node.reference).signature
+        : _makeFunctionType(target, node.function.returnType, null,
             getter: node.isGetter);
-      }
-    }
   }
 
-  void visitConstructor(Constructor node) {
-    if (importPass) return;
-    _makeFunction(node.reference, VoidType(),
+  w.FunctionType visitConstructor(Constructor node, Reference target) {
+    return _makeFunctionType(target, VoidType(),
         InterfaceType(node.enclosingClass, Nullability.nonNullable),
         getter: false);
-  }
-
-  void _makeFunction(
-      Reference target, DartType returnType, DartType? receiverType,
-      {required bool getter}) {
-    if (translator.functions.containsKey(target)) return;
-
-    w.FunctionType ftype =
-        _makeFunctionType(target, returnType, receiverType, getter: getter);
-    translator.functions[target] = m.addFunction(ftype);
   }
 
   w.FunctionType _makeFunctionType(

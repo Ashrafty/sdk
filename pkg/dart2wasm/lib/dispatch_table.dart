@@ -20,7 +20,7 @@ class SelectorInfo {
   final ParameterInfo paramInfo;
   int returnCount;
 
-  final Map<int, Reference> classes = {};
+  final Map<int, Reference> targets = {};
   late final int offset;
   late final w.FunctionType signature;
 
@@ -71,13 +71,13 @@ class DispatchTable {
         selectorIds = List.of(selectorsInClass[superId]);
         for (int selectorId in selectorIds) {
           SelectorInfo selector = selectorInfo[selectorId]!;
-          selector.classes[info.classId] = selector.classes[superId]!;
+          selector.targets[info.classId] = selector.targets[superId]!;
         }
       }
 
       void addMember(Reference reference) {
         SelectorInfo selector = selectorForTarget(reference);
-        selector.classes[info.classId] = reference;
+        selector.targets[info.classId] = reference;
         selectorIds.add(selector.id);
       }
 
@@ -104,7 +104,7 @@ class DispatchTable {
       List<bool> inputNullable =
           List.filled(1 + selector.paramInfo.paramCount, false);
       List<bool> outputNullable = List.filled(selector.returnCount, false);
-      selector.classes.forEach((id, target) {
+      selector.targets.forEach((id, target) {
         ClassInfo receiver = translator.classes[id];
         List<DartType> positional;
         Map<String, DartType> named;
@@ -179,7 +179,7 @@ class DispatchTable {
     int nextAvailable = 0;
     for (SelectorInfo selector in selectorInfo.values) {
       if (selector.callCount > 0) {
-        List<int> classIds = selector.classes.keys
+        List<int> classIds = selector.targets.keys
             .where((id) => !translator.classes[id].cls.isAbstract)
             .toList()
               ..sort();
@@ -195,10 +195,10 @@ class DispatchTable {
     table = List.filled(nextAvailable, null);
     for (SelectorInfo selector in selectorInfo.values) {
       if (selector.callCount > 0) {
-        for (int classId in selector.classes.keys) {
+        for (int classId in selector.targets.keys) {
           if (!translator.classes[classId].cls.isAbstract) {
             assert(table[selector.offset + classId] == null);
-            table[selector.offset + classId] = selector.classes[classId];
+            table[selector.offset + classId] = selector.targets[classId];
           }
         }
       }
@@ -211,7 +211,7 @@ class DispatchTable {
     for (int i = 0; i < table.length; i++) {
       Reference? target = table[i];
       if (target != null) {
-        w.BaseFunction? fun = translator.functions[target];
+        w.BaseFunction? fun = translator.functions.getExistingFunction(target);
         if (fun != null) {
           wasmTable.setElement(i, fun);
           //print("$i: $fun");

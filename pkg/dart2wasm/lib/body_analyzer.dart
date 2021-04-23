@@ -35,7 +35,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   final Translator translator;
   late final Intrinsifier intrinsifier;
   final w.ValueType voidMarker;
-  final objectType;
+  final w.ValueType objectType;
 
   Set<Expression> preserved = {};
   Map<Expression, CodeGenCallback> inject = {};
@@ -99,7 +99,8 @@ class BodyAnalyzer extends Visitor<w.ValueType>
   }
 
   visitSuperInitializer(SuperInitializer node) {
-    if (translator.functions.containsKey(node.target.reference)) {
+    if (node.target.enclosingClass !=
+        codeGen.translator.coreTypes.objectClass) {
       return _visitArguments(node.arguments, node.target.reference, 1);
     }
     assert(node.arguments.positional.isEmpty && node.arguments.named.isEmpty);
@@ -220,7 +221,8 @@ class BodyAnalyzer extends Visitor<w.ValueType>
       return global.type.type;
     } else {
       assert(target is Procedure && target.isGetter);
-      w.FunctionType ftype = translator.functions[target.reference]!.type;
+      w.FunctionType ftype =
+          translator.functions.getFunction(target.reference).type;
       return translator.outputOrVoid(ftype.outputs);
     }
   }
@@ -235,7 +237,8 @@ class BodyAnalyzer extends Visitor<w.ValueType>
       valueType = global.type.type;
     } else {
       assert(target is Procedure && target.isSetter);
-      w.FunctionType ftype = translator.functions[target.reference]!.type;
+      w.FunctionType ftype =
+          translator.functions.getFunction(target.reference).type;
       assert(ftype.outputs.isEmpty);
       valueType = ftype.inputs.single;
     }

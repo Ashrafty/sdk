@@ -60,12 +60,12 @@ class Translator {
   late final DispatchTable dispatchTable;
   late final Globals globals;
   late final Constants constants;
+  late final FunctionCollector functions;
 
   List<ClassInfo> classes = [];
   Map<Class, ClassInfo> classInfo = {};
   Map<w.HeapType, ClassInfo> classForHeapType = {};
   Map<Field, int> fieldIndex = {};
-  Map<Reference, w.BaseFunction> functions = {};
   Map<Reference, ParameterInfo> staticParamInfo = {};
   late Procedure mainFunction;
   late w.Module m;
@@ -85,6 +85,7 @@ class Translator {
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
     subtypes = hierarchy.computeSubtypesInformation();
     dispatchTable = DispatchTable(this);
+    functions = FunctionCollector(this);
 
     Library coreLibrary =
         component.libraries.firstWhere((l) => l.name == "dart.core");
@@ -138,56 +139,56 @@ class Translator {
     constants = Constants(this);
 
     dispatchTable.build();
-    FunctionCollector(this).collect();
-    dispatchTable.output();
+    functions.collectImports();
 
     mainFunction =
         libraries.first.procedures.firstWhere((p) => p.name.text == "main");
-    var mainReturns = functions[mainFunction.reference]!.type.outputs;
+    var mainReturns =
+        functions.getFunction(mainFunction.reference).type.outputs;
     if (mainReturns.any((t) => t is w.RefType)) {
       print(
           "Warning: main returns a reference type. JS embedding may complain.");
     }
 
     var codeGen = CodeGenerator(this);
-    for (Reference reference in functions.keys) {
+    while (functions.pending.isNotEmpty) {
+      Reference reference = functions.pending.removeLast();
       Member member = reference.asMember;
-      w.BaseFunction function = functions[reference]!;
-      if (function is w.DefinedFunction) {
-        String exportName = reference.isSetter ? "$member=" : "$member";
-        if (options.printKernel || options.printWasm) {
-          print("#${function.index}: $exportName");
-        }
-        if (options.printKernel) {
-          if (member is Constructor) {
-            Class cls = member.enclosingClass;
-            for (Field field in cls.fields) {
-              if (field.isInstanceMember && field.initializer != null) {
-                print("${field.name}: ${field.initializer}");
-              }
-            }
-            for (Initializer initializer in member.initializers) {
-              print(initializer);
+      var function =
+          functions.getExistingFunction(reference) as w.DefinedFunction;
+      String exportName = reference.isSetter ? "$member=" : "$member";
+      if (options.printKernel || options.printWasm) {
+        print("#${function.index}: $exportName");
+      }
+      if (options.printKernel) {
+        if (member is Constructor) {
+          Class cls = member.enclosingClass;
+          for (Field field in cls.fields) {
+            if (field.isInstanceMember && field.initializer != null) {
+              print("${field.name}: ${field.initializer}");
             }
           }
-          Statement? body = member.function?.body;
-          if (body != null) {
-            print(body);
+          for (Initializer initializer in member.initializers) {
+            print(initializer);
           }
-          if (!options.printWasm) print("");
         }
-        if (member == mainFunction || options.exportAll) {
-          m.exportFunction(exportName, function);
+        Statement? body = member.function?.body;
+        if (body != null) {
+          print(body);
         }
-        codeGen.generate(reference, function);
-        if (options.printWasm) print(function.body.trace);
+        if (!options.printWasm) print("");
+      }
+      if (member == mainFunction || options.exportAll) {
+        m.exportFunction(exportName, function);
+      }
+      codeGen.generate(reference, function);
+      if (options.printWasm) print(function.body.trace);
 
-        for (Lambda lambda in codeGen.closures.lambdas.values) {
-          codeGen.generateLambda(lambda);
-          if (options.printWasm) {
-            print("#${lambda.function.index}: $exportName (closure)");
-            print(lambda.function.body.trace);
-          }
+      for (Lambda lambda in codeGen.closures.lambdas.values) {
+        codeGen.generateLambda(lambda);
+        if (options.printWasm) {
+          print("#${lambda.function.index}: $exportName (closure)");
+          print(lambda.function.body.trace);
         }
       }
     }
@@ -198,6 +199,8 @@ class Translator {
         print(info.function.body.trace);
       }
     }
+
+    dispatchTable.output();
 
     return m;
   }
@@ -411,7 +414,7 @@ class Translator {
     if (member.isInstanceMember) {
       return dispatchTable.selectorForTarget(target).signature;
     } else {
-      return functions[target]!.type;
+      return functions.getFunction(target).type;
     }
   }
 

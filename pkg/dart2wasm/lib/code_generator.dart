@@ -55,7 +55,11 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       {List<w.Local>? inlinedLocals, w.Label? returnLabel}) {
     Member member = reference.asMember;
     b = function.body;
-    assert(!member.isExternal);
+    if (member.isExternal) {
+      b.unreachable();
+      b.end();
+      return;
+    }
 
     this.member = member;
     this.function = function;
@@ -264,10 +268,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void _call(Reference target) {
     assert(target.asMember is! Field);
-    w.BaseFunction? targetFunction = translator.functions[target];
-    if (targetFunction == null) {
-      throw "No implementation for function ${target.asMember}";
-    }
+    w.BaseFunction targetFunction = translator.functions.getFunction(target);
     if (translator.shouldInline(target)) {
       List<w.Local> inlinedLocals = targetFunction.type.inputs
           .map((t) => function.addLocal(typeForLocal(t)))
@@ -585,10 +586,12 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.struct_get(object.struct, 0);
     b.i32_add();
     b.call_indirect(selector.signature);
+
+    translator.functions.activateSelector(selector);
   }
 
   void _polymorphicSpecialization(SelectorInfo selector, w.Local receiver) {
-    Map<int, Reference> implementations = Map.from(selector.classes);
+    Map<int, Reference> implementations = Map.from(selector.targets);
     implementations.removeWhere((id, target) => target.asMember.isAbstract);
 
     w.Local idVar = function.addLocal(w.NumType.i32);
