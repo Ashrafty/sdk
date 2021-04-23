@@ -115,6 +115,7 @@ class Instructions with SerializerMixin {
   }
 
   ValueType get _topOfStack {
+    if (!reachable) return const InvalidType();
     if (_stackTypes.isEmpty) _reportError("Stack underflow");
     return _stackTypes.last;
   }
@@ -152,6 +153,7 @@ class Instructions with SerializerMixin {
       List<ValueType> Function(List<ValueType>) outputsFun,
       {List<Object>? trace, bool reachableAfter = true}) {
     if (!reachable) {
+      if (trace != null) _debugTrace(trace, reachableAfter: false);
       return true;
     }
     if (_stackTypes.length - inputs.length < labelStack.last.baseStackHeight) {
