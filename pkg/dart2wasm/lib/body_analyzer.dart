@@ -120,6 +120,18 @@ class BodyAnalyzer extends Visitor<w.ValueType>
 
   visitAssertStatement(AssertStatement node) => voidMarker;
 
+  visitTryCatch(TryCatch node) {
+    // TODO: Include catches
+    node.body.accept(this);
+    return voidMarker;
+  }
+
+  visitTryFinally(TryFinally node) {
+    node.body.accept(this);
+    node.finalizer.accept(this);
+    return voidMarker;
+  }
+
   visitWhileStatement(WhileStatement node) {
     wrapExpression(node.condition, w.NumType.i32);
     node.body.accept(this);

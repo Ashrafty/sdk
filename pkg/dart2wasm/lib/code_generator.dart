@@ -31,6 +31,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
+  List<Statement> finalizers = [];
+
   late w.Instructions b;
 
   CodeGenerator(this.translator) : voidMarker = translator.voidMarker;
@@ -352,6 +354,17 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void visitAssertStatement(AssertStatement node) {}
 
+  void visitTryCatch(TryCatch node) {
+    // TODO: Include catches
+    node.body.accept(this);
+  }
+
+  visitTryFinally(TryFinally node) {
+    finalizers.add(node.finalizer);
+    node.body.accept(this);
+    finalizers.removeLast().accept(this);
+  }
+
   void visitExpressionStatement(ExpressionStatement node) {
     wrap(node.expression);
   }
@@ -483,6 +496,9 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       wrap(expression);
     } else {
       translator.convertType(b, voidMarker, returnType, (b) {});
+    }
+    for (Statement finalizer in finalizers.reversed) {
+      finalizer.accept(this);
     }
     if (returnLabel != null) {
       b.br(returnLabel!);
