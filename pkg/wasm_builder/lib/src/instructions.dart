@@ -120,6 +120,11 @@ class Instructions with SerializerMixin {
     return _stackTypes.last;
   }
 
+  Label get _topOfLabelStack {
+    if (labelStack.isEmpty) _reportError("Label stack underflow");
+    return labelStack.last;
+  }
+
   List<ValueType> _stack(int n) {
     if (_stackTypes.length < n) _reportError("Stack underflow");
     return _stackTypes.sublist(_stackTypes.length - n);
@@ -156,7 +161,7 @@ class Instructions with SerializerMixin {
       if (trace != null) _debugTrace(trace, reachableAfter: false);
       return true;
     }
-    if (_stackTypes.length - inputs.length < labelStack.last.baseStackHeight) {
+    if (_stackTypes.length - inputs.length < _topOfLabelStack.baseStackHeight) {
       _reportError("Underflowing base stack of innermost block");
     }
     final List<ValueType> stack = _checkStackTypes(inputs);
@@ -196,7 +201,7 @@ class Instructions with SerializerMixin {
       {required List<Object> trace,
       required bool reachableAfter,
       required bool reindent}) {
-    final Label label = labelStack.last;
+    final Label label = _topOfLabelStack;
     if (reachable) {
       final int expectedHeight = label.baseStackHeight + label.outputs.length;
       if (_stackTypes.length != expectedHeight) {
@@ -265,9 +270,9 @@ class Instructions with SerializerMixin {
   }
 
   void else_() {
-    assert(labelStack.last is If ||
+    assert(_topOfLabelStack is If ||
         _reportError("Unexpected 'else' (not in 'if' block)"));
-    final If label = labelStack.last as If;
+    final If label = _topOfLabelStack as If;
     assert(!label.hasElse || _reportError("Duplicate 'else' in 'if' block"));
     assert(_verifyEndOfBlock(label.inputs,
         trace: const ['else'], reachableAfter: true, reindent: true));
@@ -278,11 +283,11 @@ class Instructions with SerializerMixin {
   }
 
   void end() {
-    assert(_verifyEndOfBlock(labelStack.last.outputs,
+    assert(_verifyEndOfBlock(_topOfLabelStack.outputs,
         trace: const ['end'],
-        reachableAfter: reachable || labelStack.last.jumpToEnd,
+        reachableAfter: reachable || _topOfLabelStack.jumpToEnd,
         reindent: false));
-    reachable |= labelStack.last.jumpToEnd;
+    reachable |= _topOfLabelStack.jumpToEnd;
     labelStack.removeLast();
     writeByte(0x0B);
   }
