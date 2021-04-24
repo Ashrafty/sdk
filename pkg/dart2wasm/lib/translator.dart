@@ -30,6 +30,7 @@ class TranslatorOptions {
   bool polymorphicSpecialization = false;
   bool printKernel = false;
   bool printWasm = false;
+  bool stubBodies = false;
   List<int>? watchPoints = null;
 }
 

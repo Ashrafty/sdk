@@ -31,7 +31,8 @@ where *options* include:
 | `--`[`no-`]`polymorphic-specialization` | no      | Do virtual calls by switching on the class ID instead of using `call_indirect`.
 | `--`[`no-`]`print-kernel`               | no      | Print IR for each function before compiling it.
 | `--`[`no-`]`print-wasm`                 | no      | Print Wasm instructions of each compiled function.
-| `--watch` *offset*             |         | Print stack trace leading to the byte at offset *offset* in the `.wasm` output file. Can be specified multiple times.
+| `--`[`no-`]`stub-bodies`                | no      | Skip translation of function bodies and just put `unreachable`.
+| `--watch` *offset*                      |         | Print stack trace leading to the byte at offset *offset* in the `.wasm` output file. Can be specified multiple times.
 
 The resulting `.wasm` file can be run with:
 

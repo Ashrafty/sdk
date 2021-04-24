@@ -55,6 +55,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   void generate(Reference reference, w.DefinedFunction function,
       {List<w.Local>? inlinedLocals, w.Label? returnLabel}) {
+    closures = Closures(this);
+
     Member member = reference.asMember;
     b = function.body;
     if (member.isExternal) {
@@ -70,8 +72,6 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     this.returnLabel = returnLabel;
     returnType = translator
         .outputOrVoid(returnLabel?.targetTypes ?? function.type.outputs);
-
-    closures = Closures(this);
 
     if (member is Field) {
       // Implicit getter or setter
@@ -124,6 +124,15 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
 
     closures.findCaptures(member.function!);
+
+    if (options.stubBodies) {
+      thisLocal = implicitParams == 1 ? paramLocals[0] : null;
+      closures.buildContexts(member.function!);
+      member.function!.body!.accept(StubBodyTraversal(this));
+      b.unreachable();
+      b.end();
+      return;
+    }
 
     bodyAnalyzer = BodyAnalyzer(this);
     bodyAnalyzer.analyzeMember(member);
@@ -187,6 +196,12 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
         lambda.functionNode.positionalParameters;
     for (int i = 0; i < positional.length; i++) {
       locals[positional[i]] = paramLocals[implicitParams + i];
+    }
+
+    if (options.stubBodies) {
+      b.unreachable();
+      b.end();
+      return;
     }
 
     Context? context = closures.contexts[lambda.functionNode]?.parent;
@@ -1013,5 +1028,122 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
   void visitAsExpression(AsExpression node) {
     wrap(node.operand);
     // TODO: Check
+  }
+}
+
+class StubBodyTraversal extends RecursiveVisitor {
+  final CodeGenerator codeGen;
+
+  StubBodyTraversal(this.codeGen);
+
+  Translator get translator => codeGen.translator;
+
+  void visitRedirectingInitializer(RedirectingInitializer node) {
+    super.visitRedirectingInitializer(node);
+    _call(node.targetReference);
+  }
+
+  void visitSuperInitializer(SuperInitializer node) {
+    super.visitSuperInitializer(node);
+    if ((node.parent as Constructor).enclosingClass.superclass?.superclass ==
+        null) {
+      return;
+    }
+    _call(node.targetReference);
+  }
+
+  void visitConstructorInvocation(ConstructorInvocation node) {
+    super.visitConstructorInvocation(node);
+    _call(node.targetReference);
+  }
+
+  void visitStaticInvocation(StaticInvocation node) {
+    super.visitStaticInvocation(node);
+    _call(node.targetReference);
+  }
+
+  void visitSuperMethodInvocation(SuperMethodInvocation node) {
+    super.visitSuperMethodInvocation(node);
+    _call(node.interfaceTargetReference!);
+  }
+
+  void visitInstanceInvocation(InstanceInvocation node) {
+    super.visitInstanceInvocation(node);
+    Member? singleTarget = translator.singleTarget(node);
+    if (singleTarget != null) {
+      _call(singleTarget.reference);
+    } else {
+      _virtualCall(node.interfaceTarget, getter: false, setter: false);
+    }
+  }
+
+  void visitEqualsCall(EqualsCall node) {
+    super.visitEqualsCall(node);
+    Member? singleTarget = translator.singleTarget(node);
+    if (singleTarget != null) {
+      _call(singleTarget.reference);
+    } else {
+      _virtualCall(node.interfaceTarget, getter: false, setter: false);
+    }
+  }
+
+  @override
+  void visitStaticGet(StaticGet node) {
+    super.visitStaticGet(node);
+    Member target = node.target;
+    if (target is Procedure) {
+      _call(target.reference);
+    }
+  }
+
+  @override
+  void visitStaticSet(StaticSet node) {
+    super.visitStaticSet(node);
+    Member target = node.target;
+    if (target is Procedure) {
+      _call(target.reference);
+    }
+  }
+
+  @override
+  void visitInstanceGet(InstanceGet node) {
+    super.visitInstanceGet(node);
+    Member? singleTarget = translator.singleTarget(node);
+    if (singleTarget != null) {
+      if (singleTarget is Procedure) {
+        _call(singleTarget.reference);
+      }
+    } else {
+      _virtualCall(node.interfaceTarget, getter: true, setter: false);
+    }
+  }
+
+  @override
+  void visitInstanceSet(InstanceSet node) {
+    super.visitInstanceSet(node);
+    Member? singleTarget = translator.singleTarget(node);
+    if (singleTarget != null) {
+      if (singleTarget is Procedure) {
+        _call(singleTarget.reference);
+      }
+    } else {
+      _virtualCall(node.interfaceTarget, getter: false, setter: true);
+    }
+  }
+
+  void _call(Reference target) {
+    if (!target.asMember.isAbstract) {
+      translator.functions.getFunction(target);
+    }
+  }
+
+  void _virtualCall(Member interfaceTarget,
+      {required bool getter, required bool setter}) {
+    int selectorId = getter
+        ? translator.tableSelectorAssigner.getterSelectorId(interfaceTarget)
+        : translator.tableSelectorAssigner
+            .methodOrSetterSelectorId(interfaceTarget);
+    SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
+    translator.functions.activateSelector(selector);
   }
 }
