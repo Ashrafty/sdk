@@ -21,10 +21,16 @@ class SelectorInfo {
   int returnCount;
 
   final Map<int, Reference> targets = {};
-  late final int offset;
   late final w.FunctionType signature;
 
+  late final List<int> classIds;
+  late final int targetCount;
+  Reference? singularTarget;
+  int? offset;
+
   String get name => paramInfo.member.name.text;
+
+  int get sortWeight => classIds.length * 10 + callCount;
 
   SelectorInfo(this.id, this.callCount, this.paramInfo, this.returnCount);
 }
@@ -175,34 +181,55 @@ class DispatchTable {
       selector.signature = translator.m.addFunctionType(inputs, outputs);
     }
 
-    // Quick and wasteful offset assignment
-    int nextAvailable = 0;
+    // Build lists of class IDs and count targets
     for (SelectorInfo selector in selectorInfo.values) {
-      if (selector.callCount > 0) {
-        List<int> classIds = selector.targets.keys
-            .where((id) => !translator.classes[id].cls.isAbstract)
-            .toList()
-              ..sort();
-        if (classIds.isNotEmpty) {
-          selector.offset = nextAvailable - classIds.first;
-          nextAvailable += classIds.last - classIds.first + 1;
-        }
-      }
+      selector.classIds = selector.targets.keys
+          .where((id) => !translator.classes[id].cls.isAbstract)
+          .toList()
+            ..sort();
+      Set<Reference> targets =
+          selector.targets.values.where((t) => !t.asMember.isAbstract).toSet();
+      selector.targetCount = targets.length;
+      if (targets.length == 1) selector.singularTarget = targets.single;
     }
-    //print("Dispatch table size: $nextAvailable");
 
-    // Fill table
-    table = List.filled(nextAvailable, null);
-    for (SelectorInfo selector in selectorInfo.values) {
-      if (selector.callCount > 0) {
-        for (int classId in selector.targets.keys) {
-          if (!translator.classes[classId].cls.isAbstract) {
-            assert(table[selector.offset + classId] == null);
-            table[selector.offset + classId] = selector.targets[classId];
+    // Assign selector offsets
+    List<SelectorInfo> selectors = selectorInfo.values
+        .where((s) => s.callCount > 0 && s.targetCount > 1)
+        .toList()
+          ..sort((a, b) => b.sortWeight - a.sortWeight);
+    int firstAvailable = 0;
+    table = [];
+    for (SelectorInfo selector in selectors) {
+      int offset = firstAvailable - selector.classIds.first;
+      bool fits;
+      do {
+        fits = true;
+        for (int classId in selector.classIds) {
+          int entry = offset + classId;
+          if (entry >= table.length) {
+            // Fits
+            break;
+          }
+          if (table[entry] != null) {
+            fits = false;
+            break;
           }
         }
+        if (!fits) offset++;
+      } while (!fits);
+      selector.offset = offset;
+      for (int classId in selector.classIds) {
+        int entry = offset + classId;
+        while (table.length <= entry) table.add(null);
+        assert(table[entry] == null);
+        table[entry] = selector.targets[classId];
+      }
+      while (firstAvailable < table.length && table[firstAvailable] != null) {
+        firstAvailable++;
       }
     }
+    //print(table.map((e) => e != null ? "!" : ".").join());
   }
 
   void output() {

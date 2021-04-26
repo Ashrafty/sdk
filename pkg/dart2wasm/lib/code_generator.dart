@@ -599,6 +599,19 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
             .methodOrSetterSelectorId(interfaceTarget);
     SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
 
+    int? offset = selector.offset;
+    if (offset == null) {
+      // Singular target or unreachable call
+      assert(selector.targetCount <= 1);
+      if (selector.targetCount == 1) {
+        pushArguments();
+        _call(selector.singularTarget!);
+      } else {
+        b.unreachable();
+      }
+      return;
+    }
+
     // Receiver is already on stack.
     w.Local receiver =
         function.addLocal(typeForLocal(selector.signature.inputs.first));
@@ -612,10 +625,12 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       return _polymorphicSpecialization(selector, receiver);
     }
 
-    b.i32_const(selector.offset);
     b.local_get(receiver);
     b.struct_get(object.struct, 0);
-    b.i32_add();
+    if (offset != 0) {
+      b.i32_const(offset);
+      b.i32_add();
+    }
     b.call_indirect(selector.signature);
 
     translator.functions.activateSelector(selector);
