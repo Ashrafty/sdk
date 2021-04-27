@@ -75,7 +75,7 @@ class ConstantInstantiator extends ConstantVisitor<void> {
 
   void convertType(w.ValueType from, w.ValueType? to, CodeGenCallback code) {
     if (to != null) {
-      translator.convertType(function.body, from, to, code);
+      translator.convertType(function, from, to, code);
     } else {
       code(function.body);
     }

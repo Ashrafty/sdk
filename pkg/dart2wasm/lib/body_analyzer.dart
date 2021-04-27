@@ -81,7 +81,7 @@ class BodyAnalyzer extends Visitor<w.ValueType>
     this.expectedType = expectedType;
     w.ValueType resultType = exp.accept(this);
     CodeGenCallback? conversion = translator.convertTypeCallback(
-        resultType, expectedType, (b) => exp.accept(codeGen));
+        codeGen.function, resultType, expectedType, (b) => exp.accept(codeGen));
     if (conversion != null) {
       inject[exp] = conversion;
       return expectedType;

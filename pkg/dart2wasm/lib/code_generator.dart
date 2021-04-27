@@ -83,14 +83,14 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       void getThis() {
         w.Local thisLocal = paramLocals[0];
         w.RefType structType = w.RefType.def(struct, nullable: true);
-        translator.convertType(b, thisLocal.type, structType, (b) {
+        translator.convertType(function, thisLocal.type, structType, (b) {
           b.local_get(thisLocal);
         });
       }
 
       if (reference.isImplicitGetter) {
         // Implicit getter
-        translator.convertType(b, fieldType, returnType, (b) {
+        translator.convertType(function, fieldType, returnType, (b) {
           getThis();
           b.struct_get(struct, index);
         });
@@ -98,7 +98,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
         // Implicit setter
         w.Local valueLocal = paramLocals[1];
         getThis();
-        translator.convertType(b, valueLocal.type, fieldType, (b) {
+        translator.convertType(function, valueLocal.type, fieldType, (b) {
           b.local_get(valueLocal);
         });
         b.struct_set(struct, index);
@@ -510,7 +510,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (expression != null) {
       wrap(expression);
     } else {
-      translator.convertType(b, voidMarker, returnType, (b) {});
+      translator.convertType(function, voidMarker, returnType, (b) {});
     }
     for (Statement finalizer in finalizers.reversed) {
       finalizer.accept(this);
@@ -961,7 +961,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       final w.ValueType type =
           signature.inputs[signatureOffset + paramInfo.nameIndex[name]!];
       if (namedLocal != null) {
-        translator.convertType(b, namedLocal.type, type, (b) {
+        translator.convertType(function, namedLocal.type, type, (b) {
           b.local_get(namedLocal);
         });
       } else {

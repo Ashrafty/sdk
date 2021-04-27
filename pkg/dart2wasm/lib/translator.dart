@@ -328,17 +328,17 @@ class Translator {
     return outputs.isEmpty ? voidMarker : outputs.single;
   }
 
-  void convertType(
-      w.Instructions b, w.ValueType from, w.ValueType to, CodeGenCallback sub) {
-    CodeGenCallback? callback = convertTypeCallback(from, to, sub);
+  void convertType(w.DefinedFunction function, w.ValueType from, w.ValueType to,
+      CodeGenCallback sub) {
+    CodeGenCallback? callback = convertTypeCallback(function, from, to, sub);
     if (callback != null) {
-      callback(b);
+      callback(function.body);
     } else {
-      sub(b);
+      sub(function.body);
     }
   }
 
-  CodeGenCallback? convertTypeCallback(
+  CodeGenCallback? convertTypeCallback(w.DefinedFunction function,
       w.ValueType from, w.ValueType to, CodeGenCallback sub) {
     if (from == voidMarker || to == voidMarker) {
       if (from != voidMarker) {
@@ -365,8 +365,11 @@ class Translator {
         ClassInfo info = classInfo[boxedClasses[from]!]!;
         assert(w.HeapType.def(info.struct).isSubtypeOf(to.heapType));
         return (b) {
-          b.i32_const(info.classId);
+          w.Local temp = function.addLocal(from);
           sub(b);
+          b.local_set(temp);
+          b.i32_const(info.classId);
+          b.local_get(temp);
           b.global_get(info.rtt);
           b.struct_new_with_rtt(info.struct);
         };
