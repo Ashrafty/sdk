@@ -83,24 +83,21 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       void getThis() {
         w.Local thisLocal = paramLocals[0];
         w.RefType structType = w.RefType.def(struct, nullable: true);
-        translator.convertType(function, thisLocal.type, structType, (b) {
-          b.local_get(thisLocal);
-        });
+        b.local_get(thisLocal);
+        translator.convertType(function, thisLocal.type, structType);
       }
 
       if (reference.isImplicitGetter) {
         // Implicit getter
-        translator.convertType(function, fieldType, returnType, (b) {
-          getThis();
-          b.struct_get(struct, index);
-        });
+        getThis();
+        b.struct_get(struct, index);
+        translator.convertType(function, fieldType, returnType);
       } else {
         // Implicit setter
         w.Local valueLocal = paramLocals[1];
         getThis();
-        translator.convertType(function, valueLocal.type, fieldType, (b) {
-          b.local_get(valueLocal);
-        });
+        b.local_get(valueLocal);
+        translator.convertType(function, valueLocal.type, fieldType);
         b.struct_set(struct, index);
       }
       b.end();
@@ -510,7 +507,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     if (expression != null) {
       wrap(expression);
     } else {
-      translator.convertType(function, voidMarker, returnType, (b) {});
+      translator.convertType(function, voidMarker, returnType);
     }
     for (Statement finalizer in finalizers.reversed) {
       finalizer.accept(this);
@@ -961,9 +958,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       final w.ValueType type =
           signature.inputs[signatureOffset + paramInfo.nameIndex[name]!];
       if (namedLocal != null) {
-        translator.convertType(function, namedLocal.type, type, (b) {
-          b.local_get(namedLocal);
-        });
+        b.local_get(namedLocal);
+        translator.convertType(function, namedLocal.type, type);
       } else {
         translator.constants
             .instantiateConstant(function, paramInfo.named[name]!, type);

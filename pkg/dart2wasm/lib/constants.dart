@@ -41,6 +41,7 @@ class ConstantInstantiator extends ConstantVisitor<void> {
 
   Translator get translator => constants.translator;
   w.Module get m => translator.m;
+  w.Instructions get b => function.body;
 
   void instantiateLazyConstant(
       Constant constant, w.RefType type, ConstantCodeGenerator generator) {
@@ -54,15 +55,14 @@ class ConstantInstantiator extends ConstantVisitor<void> {
       w.FunctionType ftype = m.addFunctionType([], [type]);
       w.DefinedFunction function = m.addFunction(ftype);
       generator(function);
-      w.Instructions b = function.body;
-      b.global_set(global);
-      b.global_get(global);
-      b.ref_as_non_null();
-      b.end();
+      w.Instructions b2 = function.body;
+      b2.global_set(global);
+      b2.global_get(global);
+      b2.ref_as_non_null();
+      b2.end();
       info = ConstantInfo(constant, global, function);
       constants.constantInfo[constant] = info;
     }
-    w.Instructions b = function.body;
     w.Label b1 = b.block([], [type]);
     w.Label b2 = b.block([], []);
     b.global_get(info.global);
@@ -73,11 +73,9 @@ class ConstantInstantiator extends ConstantVisitor<void> {
     b.end();
   }
 
-  void convertType(w.ValueType from, w.ValueType? to, CodeGenCallback code) {
+  void convertType(w.ValueType from, w.ValueType? to) {
     if (to != null) {
-      translator.convertType(function, from, to, code);
-    } else {
-      code(function.body);
+      translator.convertType(function, from, to);
     }
   }
 
@@ -91,30 +89,26 @@ class ConstantInstantiator extends ConstantVisitor<void> {
     if (expectedType != constants.translator.voidMarker) {
       w.HeapType heapType =
           expectedType is w.RefType ? expectedType.heapType : w.HeapType.data;
-      w.Instructions b = function.body;
       b.ref_null(heapType);
     }
   }
 
   @override
   void visitBoolConstant(BoolConstant constant) {
-    convertType(w.NumType.i32, expectedType, (b) {
-      b.i32_const(constant.value ? 1 : 0);
-    });
+    b.i32_const(constant.value ? 1 : 0);
+    convertType(w.NumType.i32, expectedType);
   }
 
   @override
   void visitIntConstant(IntConstant constant) {
-    convertType(w.NumType.i64, expectedType, (b) {
-      b.i64_const(constant.value);
-    });
+    b.i64_const(constant.value);
+    convertType(w.NumType.i64, expectedType);
   }
 
   @override
   void visitDoubleConstant(DoubleConstant constant) {
-    convertType(w.NumType.f64, expectedType, (b) {
-      b.f64_const(constant.value);
-    });
+    b.f64_const(constant.value);
+    convertType(w.NumType.f64, expectedType);
   }
 
   @override
