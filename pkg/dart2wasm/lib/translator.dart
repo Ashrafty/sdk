@@ -320,6 +320,13 @@ class Translator {
     });
   }
 
+  w.ValueType ensureBoxed(w.ValueType type) {
+    // Box receiver if it's primitive
+    if (type is w.RefType) return type;
+    return w.RefType.def(classInfo[boxedClasses[type]!]!.struct,
+        nullable: false);
+  }
+
   w.ValueType typeForLocal(w.ValueType type) {
     return options.localNullability ? type : type.withNullability(true);
   }

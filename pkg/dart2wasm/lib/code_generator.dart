@@ -122,38 +122,34 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
     closures.findCaptures(member.function!);
 
-    if (options.stubBodies) {
-      thisLocal = implicitParams == 1 ? paramLocals[0] : null;
-      closures.buildContexts(member.function!);
-      member.function!.body!.accept(StubBodyTraversal(this));
-      b.unreachable();
-      b.end();
-      return;
+    bool specializeThis = true;
+    if (!options.stubBodies) {
+      bodyAnalyzer = BodyAnalyzer(this);
+      bodyAnalyzer.analyzeMember(member);
+      specializeThis = bodyAnalyzer.specializeThis;
     }
-
-    bodyAnalyzer = BodyAnalyzer(this);
-    bodyAnalyzer.analyzeMember(member);
-    //print(bodyAnalyzer.preserved);
-    //print(bodyAnalyzer.inject);
 
     if (member is Constructor) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       thisLocal = paramLocals[0];
-      Class cls = member.enclosingClass;
-      for (Field field in cls.fields) {
-        if (field.isInstanceMember && field.initializer != null) {
-          int fieldIndex = translator.fieldIndex[field]!;
-          b.local_get(thisLocal!);
-          wrap(field.initializer!);
-          b.struct_set(info.struct, fieldIndex);
+      if (!options.stubBodies) {
+        Class cls = member.enclosingClass;
+        for (Field field in cls.fields) {
+          if (field.isInstanceMember && field.initializer != null) {
+            int fieldIndex = translator.fieldIndex[field]!;
+            b.local_get(thisLocal!);
+            wrap(field.initializer!);
+            b.struct_set(info.struct, fieldIndex);
+          }
         }
+        visitList(member.initializers, this);
       }
-      visitList(member.initializers, this);
     } else if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
-      if (bodyAnalyzer.specializeThis) {
-        thisLocal = function.addLocal(
-            typeForLocal(w.RefType.def(info.repr.struct, nullable: false)));
+      w.RefType thisType = w.RefType.def(info.repr.struct, nullable: false);
+      if (specializeThis &&
+          translator.needsConversion(paramLocals[0].type, thisType)) {
+        thisLocal = function.addLocal(typeForLocal(thisType));
         b.local_get(paramLocals[0]);
         b.global_get(info.rtt);
         b.ref_cast();
@@ -168,6 +164,13 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     closures.buildContexts(member.function!);
     allocateContext(member.function!);
     captureParameters();
+
+    if (options.stubBodies) {
+      member.function!.body!.accept(StubBodyTraversal(this));
+      b.unreachable();
+      b.end();
+      return;
+    }
 
     member.function!.body!.accept(this);
 
@@ -193,12 +196,6 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
         lambda.functionNode.positionalParameters;
     for (int i = 0; i < positional.length; i++) {
       locals[positional[i]] = paramLocals[implicitParams + i];
-    }
-
-    if (options.stubBodies) {
-      b.unreachable();
-      b.end();
-      return;
     }
 
     Context? context = closures.contexts[lambda.functionNode]?.parent;
@@ -229,6 +226,12 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
     allocateContext(lambda.functionNode);
     captureParameters();
+
+    if (options.stubBodies) {
+      b.unreachable();
+      b.end();
+      return;
+    }
 
     lambda.functionNode.body!.accept(this);
     if (lambda.functionNode.returnType is VoidType) {
@@ -266,6 +269,8 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       if (capture != null) {
         b.local_get(capture.context.currentLocal);
         b.local_get(local);
+        translator.convertType(function, local.type,
+            capture.context.struct.fields[capture.fieldIndex].type.unpacked);
         b.struct_set(capture.context.struct, capture.fieldIndex);
       }
     });

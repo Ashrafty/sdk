@@ -171,6 +171,7 @@ class DispatchTable {
               inputNullable[i]
                   ? Nullability.nullable
                   : Nullability.nonNullable)));
+      inputs[0] = translator.ensureBoxed(inputs[0]);
       List<w.ValueType> outputs = List.generate(
           outputSets.length,
           (i) => translator.translateType(InterfaceType(
