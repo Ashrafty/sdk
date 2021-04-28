@@ -15,7 +15,8 @@ import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
-class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
+class CodeGenerator extends ExpressionVisitor<void>
+    implements InitializerVisitor<void>, StatementVisitor<void> {
   Translator translator;
   w.ValueType voidMarker;
 
@@ -45,11 +46,18 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
 
   w.ValueType typeForLocal(w.ValueType type) => translator.typeForLocal(type);
 
-  void defaultNode(Node node) {
+  @override
+  void defaultInitializer(Initializer node) {
     throw "Not supported: ${node.runtimeType}";
   }
 
-  void defaultTreeNode(TreeNode node) {
+  @override
+  void defaultExpression(Expression node) {
+    throw "Not supported: ${node.runtimeType}";
+  }
+
+  @override
+  void defaultStatement(Statement node) {
     throw "Not supported: ${node.runtimeType}";
   }
 
@@ -142,7 +150,9 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
             b.struct_set(info.struct, fieldIndex);
           }
         }
-        visitList(member.initializers, this);
+        for (Initializer initializer in member.initializers) {
+          initializer.accept(this);
+        }
       }
     } else if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
@@ -276,7 +286,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     });
   }
 
-  void wrap(TreeNode node) {
+  void wrap(Expression node) {
     CodeGenCallback? injection = bodyAnalyzer.inject[node];
     if (injection != null) {
       injection(b);
@@ -303,6 +313,18 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
+  @override
+  void visitInvalidInitializer(InvalidInitializer node) {}
+
+  @override
+  void visitAssertInitializer(AssertInitializer node) {}
+
+  @override
+  void visitLocalInitializer(LocalInitializer node) {
+    node.variable.accept(this);
+  }
+
+  @override
   void visitFieldInitializer(FieldInitializer node) {
     w.StructType struct = translator
         .classInfo[(node.parent as Constructor).enclosingClass]!.struct;
@@ -313,6 +335,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.struct_set(struct, fieldIndex);
   }
 
+  @override
   void visitRedirectingInitializer(RedirectingInitializer node) {
     b.local_get(thisLocal!);
     if (options.parameterNullability && thisLocal!.type.nullable) {
@@ -322,6 +345,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     _call(node.targetReference);
   }
 
+  @override
   void visitSuperInitializer(SuperInitializer node) {
     if ((node.parent as Constructor).enclosingClass.superclass?.superclass ==
         null) {
@@ -335,15 +359,20 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     _call(node.targetReference);
   }
 
+  @override
   void visitBlock(Block node) {
-    visitList(node.statements, this);
+    for (Statement statement in node.statements) {
+      statement.accept(this);
+    }
   }
 
+  @override
   void visitBlockExpression(BlockExpression node) {
     node.body.accept(this);
     wrap(node.value);
   }
 
+  @override
   void visitVariableDeclaration(VariableDeclaration node) {
     w.ValueType type = translateType(node.type);
     w.Local? local;
@@ -367,21 +396,29 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
+  @override
   void visitEmptyStatement(EmptyStatement node) {}
 
+  @override
   void visitAssertStatement(AssertStatement node) {}
 
+  @override
+  void visitAssertBlock(AssertBlock node) {}
+
+  @override
   void visitTryCatch(TryCatch node) {
     // TODO: Include catches
     node.body.accept(this);
   }
 
-  visitTryFinally(TryFinally node) {
+  @override
+  void visitTryFinally(TryFinally node) {
     finalizers.add(node.finalizer);
     node.body.accept(this);
     finalizers.removeLast().accept(this);
   }
 
+  @override
   void visitExpressionStatement(ExpressionStatement node) {
     wrap(node.expression);
   }
@@ -422,16 +459,16 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
-  void _conditional(Expression condition, TreeNode then, TreeNode? otherwise,
+  void _conditional(Expression condition, void then(), void otherwise()?,
       List<w.ValueType> result) {
     if (!_hasLogicalOperator(condition)) {
       // Simple condition
       wrap(condition);
       b.if_(const [], result);
-      wrap(then);
+      then();
       if (otherwise != null) {
         b.else_();
-        wrap(otherwise);
+        otherwise();
       }
       b.end();
     } else {
@@ -440,45 +477,55 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
       if (otherwise != null) {
         w.Label elseBlock = b.block();
         _branchIf(condition, elseBlock, negated: true);
-        wrap(then);
+        then();
         b.br(ifBlock);
         b.end();
-        wrap(otherwise);
+        otherwise();
       } else {
         _branchIf(condition, ifBlock, negated: true);
-        wrap(then);
+        then();
       }
       b.end();
     }
   }
 
+  @override
   void visitIfStatement(IfStatement node) {
-    _conditional(node.condition, node.then, node.otherwise, const []);
+    _conditional(
+        node.condition,
+        () => node.then.accept(this),
+        node.otherwise != null ? () => node.otherwise!.accept(this) : null,
+        const []);
   }
 
+  @override
   void visitDoStatement(DoStatement node) {
     w.Label loop = b.loop();
     allocateContext(node);
-    wrap(node.body);
+    node.body.accept(this);
     _branchIf(node.condition, loop, negated: false);
     b.end();
   }
 
+  @override
   void visitWhileStatement(WhileStatement node) {
     w.Label block = b.block();
     w.Label loop = b.loop();
     _branchIf(node.condition, block, negated: true);
     allocateContext(node);
-    wrap(node.body);
+    node.body.accept(this);
     b.br(loop);
     b.end();
     b.end();
   }
 
+  @override
   void visitForStatement(ForStatement node) {
     Context? context = closures.contexts[node];
     allocateContext(node);
-    visitList(node.variables, this);
+    for (VariableDeclaration variable in node.variables) {
+      variable.accept(this);
+    }
     w.Label block = b.block();
     w.Label loop = b.loop();
     _branchIf(node.condition, block, negated: true);
@@ -507,6 +554,12 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.end();
   }
 
+  @override
+  void visitForInStatement(ForInStatement node) {
+    throw "ForInStatement should have been desugared: $node";
+  }
+
+  @override
   void visitReturnStatement(ReturnStatement node) {
     Expression? expression = node.expression;
     if (expression != null) {
@@ -524,15 +577,30 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
+  @override
+  void visitLabeledStatement(LabeledStatement node) => defaultStatement(node);
+  @override
+  void visitBreakStatement(BreakStatement node) => defaultStatement(node);
+  @override
+  void visitSwitchStatement(SwitchStatement node) => defaultStatement(node);
+  @override
+  void visitContinueSwitchStatement(ContinueSwitchStatement node) =>
+      defaultStatement(node);
+  @override
+  void visitYieldStatement(YieldStatement node) => defaultStatement(node);
+
+  @override
   void visitLet(Let node) {
     node.variable.accept(this);
     wrap(node.body);
   }
 
+  @override
   void visitThisExpression(ThisExpression node) {
     b.local_get(thisLocal!);
   }
 
+  @override
   void visitConstructorInvocation(ConstructorInvocation node) {
     ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
     w.Local temp = function.addLocal(
@@ -553,11 +621,13 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
+  @override
   void visitStaticInvocation(StaticInvocation node) {
     _visitArguments(node.arguments, node.targetReference, 0);
     _call(node.targetReference);
   }
 
+  @override
   void visitSuperMethodInvocation(SuperMethodInvocation node) {
     b.local_get(thisLocal!);
     if (options.parameterNullability && thisLocal!.type.nullable) {
@@ -567,6 +637,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     _call(node.interfaceTargetReference!);
   }
 
+  @override
   void visitInstanceInvocation(InstanceInvocation node) {
     Procedure target = node.interfaceTarget;
     wrap(node.receiver);
@@ -581,6 +652,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }, getter: false, setter: false);
   }
 
+  @override
   void visitEqualsCall(EqualsCall node) {
     // TODO: virtual call
     wrap(node.left);
@@ -588,6 +660,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.ref_eq();
   }
 
+  @override
   void visitEqualsNull(EqualsNull node) {
     wrap(node.expression);
     b.ref_is_null();
@@ -916,22 +989,29 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.call(lambda.function);
   }
 
+  @override
   void visitLogicalExpression(LogicalExpression node) {
-    _conditional(
-        node, BoolLiteral(true), BoolLiteral(false), const [w.NumType.i32]);
+    _conditional(node, () => b.i32_const(1), () => b.i32_const(0),
+        const [w.NumType.i32]);
   }
 
+  @override
   void visitNot(Not node) {
     wrap(node.operand);
     b.i32_eqz();
   }
 
+  @override
   void visitConditionalExpression(ConditionalExpression node) {
     w.ValueType? type = bodyAnalyzer.expressionType[node]!;
-    _conditional(node.condition, node.then, node.otherwise,
+    _conditional(
+        node.condition,
+        () => wrap(node.then),
+        () => wrap(node.otherwise),
         [if (type != null && type != voidMarker) type]);
   }
 
+  @override
   void visitNullCheck(NullCheck node) {
     wrap(node.operand);
   }
@@ -972,6 +1052,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     }
   }
 
+  @override
   void visitStringConcatenation(StringConcatenation node) {
     // TODO: Call toString and concatenate
     for (Expression expression in node.expressions) {
@@ -984,39 +1065,47 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.struct_new_with_rtt(info.struct);
   }
 
+  @override
   void visitThrow(Throw node) {
     wrap(node.expression);
     // TODO: Throw exception
     b.unreachable();
   }
 
+  @override
   void visitConstantExpression(ConstantExpression node) {
     translator.constants.instantiateConstant(
         function, node.constant, bodyAnalyzer.expressionType[node]);
   }
 
+  @override
   void visitNullLiteral(NullLiteral node) {
     translator.constants.instantiateConstant(
         function, NullConstant(), bodyAnalyzer.expressionType[node]);
   }
 
+  @override
   void visitStringLiteral(StringLiteral node) {
     translator.constants
         .instantiateConstant(function, StringConstant(node.value), null);
   }
 
+  @override
   void visitBoolLiteral(BoolLiteral node) {
     b.i32_const(node.value ? 1 : 0);
   }
 
+  @override
   void visitIntLiteral(IntLiteral node) {
     b.i64_const(node.value);
   }
 
+  @override
   void visitDoubleLiteral(DoubleLiteral node) {
     b.f64_const(node.value);
   }
 
+  @override
   void visitIsExpression(IsExpression node) {
     DartType type = node.type;
     if (type is! InterfaceType) throw "Unsupported type in 'is' check: $type";
@@ -1041,6 +1130,7 @@ class CodeGenerator extends Visitor<void> with VisitorVoidMixin {
     b.i32_eq();
   }
 
+  @override
   void visitAsExpression(AsExpression node) {
     wrap(node.operand);
     // TODO: Check
@@ -1054,11 +1144,13 @@ class StubBodyTraversal extends RecursiveVisitor {
 
   Translator get translator => codeGen.translator;
 
+  @override
   void visitRedirectingInitializer(RedirectingInitializer node) {
     super.visitRedirectingInitializer(node);
     _call(node.targetReference);
   }
 
+  @override
   void visitSuperInitializer(SuperInitializer node) {
     super.visitSuperInitializer(node);
     if ((node.parent as Constructor).enclosingClass.superclass?.superclass ==
@@ -1068,21 +1160,25 @@ class StubBodyTraversal extends RecursiveVisitor {
     _call(node.targetReference);
   }
 
+  @override
   void visitConstructorInvocation(ConstructorInvocation node) {
     super.visitConstructorInvocation(node);
     _call(node.targetReference);
   }
 
+  @override
   void visitStaticInvocation(StaticInvocation node) {
     super.visitStaticInvocation(node);
     _call(node.targetReference);
   }
 
+  @override
   void visitSuperMethodInvocation(SuperMethodInvocation node) {
     super.visitSuperMethodInvocation(node);
     _call(node.interfaceTargetReference!);
   }
 
+  @override
   void visitInstanceInvocation(InstanceInvocation node) {
     super.visitInstanceInvocation(node);
     Member? singleTarget = translator.singleTarget(node);
@@ -1093,6 +1189,7 @@ class StubBodyTraversal extends RecursiveVisitor {
     }
   }
 
+  @override
   void visitEqualsCall(EqualsCall node) {
     super.visitEqualsCall(node);
     Member? singleTarget = translator.singleTarget(node);
