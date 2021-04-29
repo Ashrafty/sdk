@@ -2,7 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:dart2wasm/body_analyzer.dart';
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/code_generator.dart';
 import 'package:dart2wasm/translator.dart';
@@ -12,7 +11,7 @@ import 'package:kernel/ast.dart';
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class Intrinsifier {
-  final BodyAnalyzer bodyAnalyzer;
+  final CodeGenerator codeGen;
   final w.ValueType intType;
   final w.ValueType doubleType;
 
@@ -27,17 +26,21 @@ class Intrinsifier {
   static const bool isEquals = false;
   static const bool isNotEquals = true;
 
-  Translator get translator => bodyAnalyzer.translator;
-  CodeGenerator get codeGen => bodyAnalyzer.codeGen;
+  Translator get translator => codeGen.translator;
+  w.Instructions get b => codeGen.b;
 
   DartType dartTypeOf(Expression exp) {
-    return exp.getStaticType(bodyAnalyzer.codeGen.typeContext);
+    return exp.getStaticType(codeGen.typeContext);
+  }
+
+  w.ValueType typeOfExp(Expression exp) {
+    return translator.translateType(dartTypeOf(exp));
   }
 
   static bool isComparison(String op) =>
       op == '<' || op == '<=' || op == '>' || op == '>=';
 
-  Intrinsifier(this.bodyAnalyzer)
+  Intrinsifier(this.codeGen)
       : intType = w.NumType.i64,
         doubleType = w.NumType.f64 {
     binaryOperatorMap = {
@@ -123,12 +126,9 @@ class Intrinsifier {
           (receiverType as InterfaceType).typeArguments.single;
       w.ArrayType arrayType = translator.arrayType(elementType);
       Expression array = node.receiver;
-      bodyAnalyzer.wrapExpression(array, bodyAnalyzer.typeOfExp(array));
-      bodyAnalyzer.inject[node] = (b) {
-        codeGen.wrap(array);
-        b.array_len(arrayType);
-        b.i64_extend_i32_u();
-      };
+      codeGen.wrap(array, w.RefType.def(arrayType, nullable: true));
+      b.array_len(arrayType);
+      b.i64_extend_i32_u();
       return w.NumType.i64;
     }
   }
@@ -153,59 +153,49 @@ class Intrinsifier {
           bool unsigned = name == 'readUnsigned';
           Expression array = node.receiver;
           Expression index = node.arguments.positional.single;
-          bodyAnalyzer.wrapExpression(
-              array, w.RefType.def(arrayType, nullable: true));
-          bodyAnalyzer.wrapExpression(index, w.NumType.i64);
-          bodyAnalyzer.inject[node] = (b) {
-            codeGen.wrap(array);
-            codeGen.wrap(index);
-            b.i32_wrap_i64();
-            if (innerExtend) {
-              if (unsigned) {
-                b.array_get_u(arrayType);
-              } else {
-                b.array_get_s(arrayType);
-              }
+          codeGen.wrap(array, w.RefType.def(arrayType, nullable: true));
+          codeGen.wrap(index, w.NumType.i64);
+          b.i32_wrap_i64();
+          if (innerExtend) {
+            if (unsigned) {
+              b.array_get_u(arrayType);
             } else {
-              b.array_get(arrayType);
+              b.array_get_s(arrayType);
             }
-            if (outerExtend) {
-              if (wasmType == w.NumType.f32) {
-                b.f64_promote_f32();
+          } else {
+            b.array_get(arrayType);
+          }
+          if (outerExtend) {
+            if (wasmType == w.NumType.f32) {
+              b.f64_promote_f32();
+              return w.NumType.f64;
+            } else {
+              if (unsigned) {
+                b.i64_extend_i32_u();
               } else {
-                if (unsigned) {
-                  b.i64_extend_i32_u();
-                } else {
-                  b.i64_extend_i32_s();
-                }
+                b.i64_extend_i32_s();
               }
+              return w.NumType.i64;
             }
-          };
-          return bodyAnalyzer.translateType(elementType);
+          }
+          return wasmType.unpacked;
         case 'write':
           Expression array = node.receiver;
           Expression index = node.arguments.positional[0];
           Expression value = node.arguments.positional[1];
-          bodyAnalyzer.wrapExpression(
-              array, w.RefType.def(arrayType, nullable: true));
-          bodyAnalyzer.wrapExpression(index, w.NumType.i64);
-          bodyAnalyzer.wrapExpression(
-              value, bodyAnalyzer.translateType(elementType));
-          bodyAnalyzer.inject[node] = (b) {
-            codeGen.wrap(array);
-            codeGen.wrap(index);
-            b.i32_wrap_i64();
-            codeGen.wrap(value);
-            if (outerExtend) {
-              if (wasmType == w.NumType.f32) {
-                b.f32_demote_f64();
-              } else {
-                b.i32_wrap_i64();
-              }
+          codeGen.wrap(array, w.RefType.def(arrayType, nullable: true));
+          codeGen.wrap(index, w.NumType.i64);
+          b.i32_wrap_i64();
+          codeGen.wrap(value, translator.translateType(elementType));
+          if (outerExtend) {
+            if (wasmType == w.NumType.f32) {
+              b.f32_demote_f64();
+            } else {
+              b.i32_wrap_i64();
             }
-            b.array_set(arrayType);
-          };
-          return bodyAnalyzer.voidMarker;
+          }
+          b.array_set(arrayType);
+          return codeGen.voidMarker;
         default:
           throw "Unsupported array method: $name";
       }
@@ -222,13 +212,9 @@ class Intrinsifier {
       if (op != null) {
         // TODO: Support differing operand types
         w.ValueType outType = isComparison(name) ? w.NumType.i32 : leftType;
-        bodyAnalyzer.wrapExpression(left, leftType);
-        bodyAnalyzer.wrapExpression(right, rightType);
-        bodyAnalyzer.inject[node] = (b) {
-          codeGen.wrap(left);
-          codeGen.wrap(right);
-          op(b);
-        };
+        codeGen.wrap(left, leftType);
+        codeGen.wrap(right, rightType);
+        op(b);
         return outType;
       }
     } else if (node.arguments.positional.length == 0) {
@@ -237,11 +223,8 @@ class Intrinsifier {
       w.ValueType opType = translator.translateType(receiverType);
       var op = unaryOperatorMap[opType]?[name];
       if (op != null) {
-        bodyAnalyzer.wrapExpression(operand, opType);
-        bodyAnalyzer.inject[node] = (b) {
-          codeGen.wrap(node.receiver);
-          op(b);
-        };
+        codeGen.wrap(operand, opType);
+        op(b);
         return unaryResultMap[name] ?? opType;
       }
     }
@@ -251,24 +234,16 @@ class Intrinsifier {
     w.ValueType leftType = translator.translateType(dartTypeOf(node.left));
     w.ValueType rightType = translator.translateType(dartTypeOf(node.right));
     if (leftType == intType && rightType == intType) {
-      bodyAnalyzer.wrapExpression(node.left, w.NumType.i64);
-      bodyAnalyzer.wrapExpression(node.right, w.NumType.i64);
-      bodyAnalyzer.inject[node] = (b) {
-        codeGen.wrap(node.left);
-        codeGen.wrap(node.right);
-        b.i64_eq();
-      };
+      codeGen.wrap(node.left, w.NumType.i64);
+      codeGen.wrap(node.right, w.NumType.i64);
+      b.i64_eq();
       return w.NumType.i32;
     }
 
     if (leftType == doubleType && rightType == doubleType) {
-      bodyAnalyzer.wrapExpression(node.left, w.NumType.f64);
-      bodyAnalyzer.wrapExpression(node.right, w.NumType.f64);
-      bodyAnalyzer.inject[node] = (b) {
-        codeGen.wrap(node.left);
-        codeGen.wrap(node.right);
-        b.f64_eq();
-      };
+      codeGen.wrap(node.left, w.NumType.f64);
+      codeGen.wrap(node.right, w.NumType.f64);
+      b.f64_eq();
       return w.NumType.i32;
     }
   }
@@ -279,36 +254,25 @@ class Intrinsifier {
       Expression first = node.arguments.positional[0];
       Expression second = node.arguments.positional[1];
       // TODO: Support non-reference types
-      w.ValueType object = w.RefType.def(
-          bodyAnalyzer.codeGen.object.repr.struct,
-          nullable: true);
-      bodyAnalyzer.wrapExpression(first, object);
-      bodyAnalyzer.wrapExpression(second, object);
-      bodyAnalyzer.inject[node] = (b) {
-        codeGen.wrap(first);
-        codeGen.wrap(second);
-        b.ref_eq();
-      };
+      w.ValueType object = translator.nullableObjectType;
+      codeGen.wrap(first, object);
+      codeGen.wrap(second, object);
+      b.ref_eq();
       return w.NumType.i32;
     }
 
     if (node.target.enclosingLibrary.name == "dart._internal" &&
         node.name.text == "unsafeCast") {
       Expression operand = node.arguments.positional.single;
-      w.ValueType object = w.RefType.def(
-          bodyAnalyzer.codeGen.object.repr.struct,
-          nullable: true);
+      w.ValueType object = translator.nullableObjectType;
       DartType targetType = node.arguments.types.single;
       InterfaceType interfaceType = targetType is InterfaceType
           ? targetType
           : translator.coreTypes.objectNullableRawType;
       ClassInfo info = translator.classInfo[interfaceType.classNode]!;
-      bodyAnalyzer.wrapExpression(operand, object);
-      bodyAnalyzer.inject[node] = (b) {
-        codeGen.wrap(operand);
-        b.global_get(info.repr.rtt);
-        b.ref_cast();
-      };
+      codeGen.wrap(operand, object);
+      b.global_get(info.repr.rtt);
+      b.ref_cast();
       return w.RefType.def(info.repr.struct,
           nullable: targetType.isPotentiallyNullable);
     }
@@ -317,14 +281,11 @@ class Intrinsifier {
         translator.wasmArrayBaseClass) {
       Expression length = node.arguments.positional[0];
       w.ArrayType arrayType = translator.arrayType(node.arguments.types.single);
-      bodyAnalyzer.wrapExpression(length, w.NumType.i64);
-      bodyAnalyzer.inject[node] = (b) {
-        // TODO: Support filling with other than default value
-        codeGen.wrap(node.arguments.positional.first);
-        b.i32_wrap_i64();
-        b.rtt_canon(arrayType);
-        b.array_new_default_with_rtt(arrayType);
-      };
+      codeGen.wrap(length, w.NumType.i64);
+      // TODO: Support filling with other than default value
+      b.i32_wrap_i64();
+      b.rtt_canon(arrayType);
+      b.array_new_default_with_rtt(arrayType);
       return w.RefType.def(arrayType, nullable: false);
     }
   }

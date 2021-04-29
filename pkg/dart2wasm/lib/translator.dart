@@ -47,6 +47,9 @@ class Translator {
   ClosedWorldClassHierarchy hierarchy;
   late ClassHierarchySubtypes subtypes;
 
+  late final w.RefType nonNullableObjectType;
+  late final w.RefType nullableObjectType;
+
   late final Class wasmTypesBaseClass;
   late final Class wasmArrayBaseClass;
   late final Class wasmDataRefClass;
@@ -136,6 +139,9 @@ class Translator {
     dummyContext = m.addStructType("<context>");
 
     ClassInfoCollector(this).collect();
+    nonNullableObjectType =
+        w.RefType.def(classes.first.struct, nullable: false);
+    nullableObjectType = w.RefType.def(classes.first.struct, nullable: true);
     globals = Globals(this);
     constants = Constants(this);
 
@@ -253,7 +259,7 @@ class Translator {
               !options.parameterNullability || type.isPotentiallyNullable);
     }
     if (type is DynamicType) {
-      return translateStorageType(coreTypes.objectNullableRawType);
+      return nullableObjectType;
     }
     if (type is VoidType) {
       return voidMarker;
@@ -262,7 +268,7 @@ class Translator {
       return translateStorageType(type.bound);
     }
     if (type is FutureOrType) {
-      return translateStorageType(coreTypes.objectNullableRawType);
+      return nullableObjectType;
     }
     if (type is FunctionType) {
       if (type.requiredParameterCount != type.positionalParameters.length ||
@@ -300,10 +306,12 @@ class Translator {
   }
 
   w.FunctionType functionType(int parameterCount) {
-    w.ValueType object = translateType(coreTypes.objectNullableRawType);
-    return m.addFunctionType(
-        [w.RefType.data(), ...List<w.ValueType>.filled(parameterCount, object)],
-        [object]);
+    return m.addFunctionType([
+      w.RefType.data(),
+      ...List<w.ValueType>.filled(parameterCount, nullableObjectType)
+    ], [
+      nullableObjectType
+    ]);
   }
 
   int parameterCountForFunctionStruct(w.HeapType heapType) {

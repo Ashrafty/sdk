@@ -2,10 +2,10 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:dart2wasm/body_analyzer.dart';
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/closures.dart';
 import 'package:dart2wasm/dispatch_table.dart';
+import 'package:dart2wasm/intrinsics.dart';
 import 'package:dart2wasm/param_info.dart';
 import 'package:dart2wasm/translator.dart';
 
@@ -15,10 +15,11 @@ import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
-class CodeGenerator extends ExpressionVisitor<void>
+class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     implements InitializerVisitor<void>, StatementVisitor<void> {
-  Translator translator;
-  w.ValueType voidMarker;
+  final Translator translator;
+  final w.ValueType voidMarker;
+  late final Intrinsifier intrinsifier;
 
   late Member member;
   late w.DefinedFunction function;
@@ -27,7 +28,6 @@ class CodeGenerator extends ExpressionVisitor<void>
   w.Label? returnLabel;
   late w.ValueType returnType;
 
-  late BodyAnalyzer bodyAnalyzer;
   late Closures closures;
 
   Map<VariableDeclaration, w.Local> locals = {};
@@ -36,7 +36,9 @@ class CodeGenerator extends ExpressionVisitor<void>
 
   late w.Instructions b;
 
-  CodeGenerator(this.translator) : voidMarker = translator.voidMarker;
+  CodeGenerator(this.translator) : voidMarker = translator.voidMarker {
+    intrinsifier = Intrinsifier(this);
+  }
 
   TranslatorOptions get options => translator.options;
 
@@ -52,7 +54,7 @@ class CodeGenerator extends ExpressionVisitor<void>
   }
 
   @override
-  void defaultExpression(Expression node) {
+  w.ValueType defaultExpression(Expression node, w.ValueType expectedType) {
     throw "Not supported: ${node.runtimeType}";
   }
 
@@ -130,13 +132,6 @@ class CodeGenerator extends ExpressionVisitor<void>
 
     closures.findCaptures(member.function!);
 
-    bool specializeThis = true;
-    if (!options.stubBodies) {
-      bodyAnalyzer = BodyAnalyzer(this);
-      bodyAnalyzer.analyzeMember(member);
-      specializeThis = bodyAnalyzer.specializeThis;
-    }
-
     if (member is Constructor) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       thisLocal = paramLocals[0];
@@ -146,7 +141,8 @@ class CodeGenerator extends ExpressionVisitor<void>
           if (field.isInstanceMember && field.initializer != null) {
             int fieldIndex = translator.fieldIndex[field]!;
             b.local_get(thisLocal!);
-            wrap(field.initializer!);
+            wrap(field.initializer!,
+                info.struct.fields[fieldIndex].type.unpacked);
             b.struct_set(info.struct, fieldIndex);
           }
         }
@@ -157,8 +153,7 @@ class CodeGenerator extends ExpressionVisitor<void>
     } else if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       w.RefType thisType = w.RefType.def(info.repr.struct, nullable: false);
-      if (specializeThis &&
-          translator.needsConversion(paramLocals[0].type, thisType)) {
+      if (translator.needsConversion(paramLocals[0].type, thisType)) {
         thisLocal = function.addLocal(typeForLocal(thisType));
         b.local_get(paramLocals[0]);
         b.global_get(info.rtt);
@@ -279,23 +274,19 @@ class CodeGenerator extends ExpressionVisitor<void>
       if (capture != null) {
         b.local_get(capture.context.currentLocal);
         b.local_get(local);
-        translator.convertType(function, local.type,
-            capture.context.struct.fields[capture.fieldIndex].type.unpacked);
+        translator.convertType(function, local.type, capture.type);
         b.struct_set(capture.context.struct, capture.fieldIndex);
       }
     });
   }
 
-  void wrap(Expression node) {
-    CodeGenCallback? injection = bodyAnalyzer.inject[node];
-    if (injection != null) {
-      injection(b);
-    } else {
-      node.accept(this);
-    }
+  w.ValueType wrap(Expression node, w.ValueType expectedType) {
+    w.ValueType resultType = node.accept1(this, expectedType);
+    translator.convertType(function, resultType, expectedType);
+    return expectedType;
   }
 
-  void _call(Reference target) {
+  w.ValueType _call(Reference target) {
     assert(target.asMember is! Field);
     w.BaseFunction targetFunction = translator.functions.getFunction(target);
     if (translator.shouldInline(target)) {
@@ -311,6 +302,7 @@ class CodeGenerator extends ExpressionVisitor<void>
     } else {
       b.call(targetFunction);
     }
+    return translator.outputOrVoid(targetFunction.type.outputs);
   }
 
   @override
@@ -331,7 +323,7 @@ class CodeGenerator extends ExpressionVisitor<void>
     int fieldIndex = translator.fieldIndex[node.field]!;
 
     b.local_get(thisLocal!);
-    wrap(node.value);
+    wrap(node.value, struct.fields[fieldIndex].type.unpacked);
     b.struct_set(struct, fieldIndex);
   }
 
@@ -367,12 +359,6 @@ class CodeGenerator extends ExpressionVisitor<void>
   }
 
   @override
-  void visitBlockExpression(BlockExpression node) {
-    node.body.accept(this);
-    wrap(node.value);
-  }
-
-  @override
   void visitVariableDeclaration(VariableDeclaration node) {
     w.ValueType type = translateType(node.type);
     w.Local? local;
@@ -384,14 +370,14 @@ class CodeGenerator extends ExpressionVisitor<void>
     if (node.initializer != null) {
       if (capture != null) {
         b.local_get(capture.context.currentLocal);
-        wrap(node.initializer!);
+        wrap(node.initializer!, capture.type);
         if (!capture.written) {
           b.local_tee(local!);
         }
         b.struct_set(capture.context.struct, capture.fieldIndex);
       } else {
-        wrap(node.initializer!);
-        b.local_set(local!);
+        wrap(node.initializer!, local!.type);
+        b.local_set(local);
       }
     }
   }
@@ -420,7 +406,7 @@ class CodeGenerator extends ExpressionVisitor<void>
 
   @override
   void visitExpressionStatement(ExpressionStatement node) {
-    wrap(node.expression);
+    wrap(node.expression, voidMarker);
   }
 
   bool _hasLogicalOperator(Expression condition) {
@@ -451,7 +437,7 @@ class CodeGenerator extends ExpressionVisitor<void>
         _branchIf(condition.right, target, negated: negated);
       }
     } else {
-      wrap(condition!);
+      wrap(condition!, w.NumType.i32);
       if (negated) {
         b.i32_eqz();
       }
@@ -463,7 +449,7 @@ class CodeGenerator extends ExpressionVisitor<void>
       List<w.ValueType> result) {
     if (!_hasLogicalOperator(condition)) {
       // Simple condition
-      wrap(condition);
+      wrap(condition, w.NumType.i32);
       b.if_(const [], result);
       then();
       if (otherwise != null) {
@@ -547,7 +533,7 @@ class CodeGenerator extends ExpressionVisitor<void>
       allocateContext(node);
     }
     for (Expression update in node.updates) {
-      wrap(update);
+      wrap(update, voidMarker);
     }
     b.br(loop);
     b.end();
@@ -563,7 +549,7 @@ class CodeGenerator extends ExpressionVisitor<void>
   void visitReturnStatement(ReturnStatement node) {
     Expression? expression = node.expression;
     if (expression != null) {
-      wrap(expression);
+      wrap(expression, returnType);
     } else {
       translator.convertType(function, voidMarker, returnType);
     }
@@ -590,18 +576,28 @@ class CodeGenerator extends ExpressionVisitor<void>
   void visitYieldStatement(YieldStatement node) => defaultStatement(node);
 
   @override
-  void visitLet(Let node) {
+  w.ValueType visitBlockExpression(
+      BlockExpression node, w.ValueType expectedType) {
+    node.body.accept(this);
+    return wrap(node.value, expectedType);
+  }
+
+  @override
+  w.ValueType visitLet(Let node, w.ValueType expectedType) {
     node.variable.accept(this);
-    wrap(node.body);
+    return wrap(node.body, expectedType);
   }
 
   @override
-  void visitThisExpression(ThisExpression node) {
+  w.ValueType visitThisExpression(
+      ThisExpression node, w.ValueType expectedType) {
     b.local_get(thisLocal!);
+    return thisLocal!.type;
   }
 
   @override
-  void visitConstructorInvocation(ConstructorInvocation node) {
+  w.ValueType visitConstructorInvocation(
+      ConstructorInvocation node, w.ValueType expectedType) {
     ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
     w.Local temp = function.addLocal(
         typeForLocal(w.RefType.def(info.repr.struct, nullable: false)));
@@ -616,57 +612,73 @@ class CodeGenerator extends ExpressionVisitor<void>
     }
     _visitArguments(node.arguments, node.targetReference, 1);
     _call(node.targetReference);
-    if (bodyAnalyzer.preserved.contains(node)) {
+    if (expectedType != voidMarker) {
       b.local_get(temp);
+      return temp.type;
+    } else {
+      return voidMarker;
     }
   }
 
   @override
-  void visitStaticInvocation(StaticInvocation node) {
+  w.ValueType visitStaticInvocation(
+      StaticInvocation node, w.ValueType expectedType) {
+    w.ValueType? intrinsicResult = intrinsifier.getStaticIntrinsic(node);
+    if (intrinsicResult != null) return intrinsicResult;
     _visitArguments(node.arguments, node.targetReference, 0);
-    _call(node.targetReference);
+    return _call(node.targetReference);
   }
 
   @override
-  void visitSuperMethodInvocation(SuperMethodInvocation node) {
+  w.ValueType visitSuperMethodInvocation(
+      SuperMethodInvocation node, w.ValueType expectedType) {
     b.local_get(thisLocal!);
     if (options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
     _visitArguments(node.arguments, node.interfaceTargetReference!, 1);
-    _call(node.interfaceTargetReference!);
+    return _call(node.interfaceTargetReference!);
   }
 
   @override
-  void visitInstanceInvocation(InstanceInvocation node) {
+  w.ValueType visitInstanceInvocation(
+      InstanceInvocation node, w.ValueType expectedType) {
+    w.ValueType? intrinsicResult = intrinsifier.getInstanceIntrinsic(node);
+    if (intrinsicResult != null) return intrinsicResult;
     Procedure target = node.interfaceTarget;
-    wrap(node.receiver);
     Member? singleTarget = translator.singleTarget(node);
     if (singleTarget != null) {
+      w.BaseFunction targetFunction =
+          translator.functions.getFunction(singleTarget.reference);
+      wrap(node.receiver, targetFunction.type.inputs.first);
       _visitArguments(node.arguments, node.interfaceTargetReference, 1);
-      _call(singleTarget.reference);
-      return;
+      return _call(singleTarget.reference);
     }
-    _virtualCall(target, () {
+    return _virtualCall(target, node.receiver, (_) {
       _visitArguments(node.arguments, node.interfaceTargetReference, 1);
     }, getter: false, setter: false);
   }
 
   @override
-  void visitEqualsCall(EqualsCall node) {
+  w.ValueType visitEqualsCall(EqualsCall node, w.ValueType expectedType) {
+    w.ValueType? intrinsicResult = intrinsifier.getEqualsIntrinsic(node);
+    if (intrinsicResult != null) return intrinsicResult;
     // TODO: virtual call
-    wrap(node.left);
-    wrap(node.right);
+    wrap(node.left, translator.nullableObjectType);
+    wrap(node.right, translator.nullableObjectType);
     b.ref_eq();
+    return w.NumType.i32;
   }
 
   @override
-  void visitEqualsNull(EqualsNull node) {
-    wrap(node.expression);
+  w.ValueType visitEqualsNull(EqualsNull node, w.ValueType expectedType) {
+    wrap(node.expression, translator.nullableObjectType);
     b.ref_is_null();
+    return w.NumType.i32;
   }
 
-  void _virtualCall(Member interfaceTarget, void pushArguments(),
+  w.ValueType _virtualCall(Member interfaceTarget, Expression receiver,
+      void pushArguments(w.FunctionType signature),
       {required bool getter, required bool setter}) {
     int selectorId = getter
         ? translator.tableSelectorAssigner.getterSelectorId(interfaceTarget)
@@ -674,41 +686,45 @@ class CodeGenerator extends ExpressionVisitor<void>
             .methodOrSetterSelectorId(interfaceTarget);
     SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
 
+    wrap(receiver, selector.signature.inputs.first);
+
     int? offset = selector.offset;
     if (offset == null) {
       // Singular target or unreachable call
       assert(selector.targetCount <= 1);
       if (selector.targetCount == 1) {
-        pushArguments();
-        _call(selector.singularTarget!);
+        pushArguments(selector.signature);
+        return _call(selector.singularTarget!);
       } else {
         b.unreachable();
+        return translator.nonNullableObjectType;
       }
-      return;
     }
 
     // Receiver is already on stack.
-    w.Local receiver =
+    w.Local receiverVar =
         function.addLocal(typeForLocal(selector.signature.inputs.first));
-    b.local_tee(receiver);
-    if (options.parameterNullability && receiver.type.nullable) {
+    b.local_tee(receiverVar);
+    if (options.parameterNullability && receiverVar.type.nullable) {
       b.ref_as_non_null();
     }
-    pushArguments();
+    pushArguments(selector.signature);
 
     if (options.polymorphicSpecialization) {
-      return _polymorphicSpecialization(selector, receiver);
+      _polymorphicSpecialization(selector, receiverVar);
+    } else {
+      b.local_get(receiverVar);
+      b.struct_get(object.struct, 0);
+      if (offset != 0) {
+        b.i32_const(offset);
+        b.i32_add();
+      }
+      b.call_indirect(selector.signature);
+
+      translator.functions.activateSelector(selector);
     }
 
-    b.local_get(receiver);
-    b.struct_get(object.struct, 0);
-    if (offset != 0) {
-      b.i32_const(offset);
-      b.i32_add();
-    }
-    b.call_indirect(selector.signature);
-
-    translator.functions.activateSelector(selector);
+    return translator.outputOrVoid(selector.signature.outputs);
   }
 
   void _polymorphicSpecialization(SelectorInfo selector, w.Local receiver) {
@@ -768,135 +784,186 @@ class CodeGenerator extends ExpressionVisitor<void>
   }
 
   @override
-  void visitVariableGet(VariableGet node) {
+  w.ValueType visitVariableGet(VariableGet node, w.ValueType expectedType) {
     w.Local? local = locals[node.variable];
     Capture? capture = closures.captures[node.variable];
     if (capture != null) {
       if (!capture.written && local != null) {
         b.local_get(local);
+        return local.type;
       } else {
         b.local_get(capture.context.currentLocal);
         b.struct_get(capture.context.struct, capture.fieldIndex);
+        return capture.type;
       }
     } else {
       if (local == null) {
         throw "Read of undefined variable ${node.variable}";
       }
       b.local_get(local);
+      return local.type;
     }
   }
 
   @override
-  void visitVariableSet(VariableSet node) {
+  w.ValueType visitVariableSet(VariableSet node, w.ValueType expectedType) {
     w.Local? local = locals[node.variable];
     Capture? capture = closures.captures[node.variable];
-    bool preserved = bodyAnalyzer.preserved.contains(node);
+    bool preserved = expectedType != voidMarker;
     if (capture != null) {
       assert(capture.written);
       b.local_get(capture.context.currentLocal);
-      wrap(node.value);
+      wrap(node.value, capture.type);
       if (preserved) {
         w.Local temp =
             function.addLocal(typeForLocal(translateType(node.variable.type)));
         b.local_tee(temp);
         b.struct_set(capture.context.struct, capture.fieldIndex);
         b.local_get(temp);
+        return temp.type;
       } else {
         b.struct_set(capture.context.struct, capture.fieldIndex);
+        return capture.type;
       }
     } else {
       if (local == null) {
         throw "Write of undefined variable ${node.variable}";
       }
-      wrap(node.value);
+      wrap(node.value, local.type);
       if (preserved) {
         b.local_tee(local);
+        return local.type;
       } else {
         b.local_set(local);
+        return voidMarker;
       }
     }
   }
 
   @override
-  void visitStaticGet(StaticGet node) {
+  w.ValueType visitStaticGet(StaticGet node, w.ValueType expectedType) {
     Member target = node.target;
     if (target is Field) {
       w.Global global = translator.globals.getGlobal(target);
       b.global_get(global);
+      return global.type.type;
     } else {
-      _call(target.reference);
+      return _call(target.reference);
     }
   }
 
   @override
-  void visitStaticSet(StaticSet node) {
-    bool preserved = bodyAnalyzer.preserved.contains(node);
-    w.Local? temp = preserved
-        ? function
-            .addLocal(translateType(node.value.getStaticType(typeContext)))
-        : null;
-    wrap(node.value);
-    if (preserved) {
-      b.local_tee(temp!);
-    }
+  w.ValueType visitStaticSet(StaticSet node, w.ValueType expectedType) {
+    bool preserved = expectedType != voidMarker;
     Member target = node.target;
     if (target is Field) {
       w.Global global = translator.globals.getGlobal(target);
+      wrap(node.value, global.type.type);
       b.global_set(global);
+      if (preserved) {
+        b.global_get(global);
+        return global.type.type;
+      } else {
+        return voidMarker;
+      }
     } else {
+      w.BaseFunction targetFunction =
+          translator.functions.getFunction(target.reference);
+      wrap(node.value, targetFunction.type.inputs.single);
+      w.Local? temp;
+      if (preserved) {
+        temp = function
+            .addLocal(translateType(node.value.getStaticType(typeContext)));
+        b.local_tee(temp);
+      }
       _call(target.reference);
+      if (preserved) {
+        b.local_get(temp!);
+        return temp.type;
+      } else {
+        return voidMarker;
+      }
+    }
+  }
+
+  @override
+  w.ValueType visitInstanceGet(InstanceGet node, w.ValueType expectedType) {
+    Member? singleTarget = translator.singleTarget(node);
+    if (singleTarget != null) {
+      if (singleTarget is Field) {
+        w.StructType struct =
+            translator.classInfo[singleTarget.enclosingClass]!.struct;
+        int fieldIndex = translator.fieldIndex[singleTarget]!;
+        w.ValueType receiverType = w.RefType.def(struct, nullable: true);
+        w.ValueType fieldType = struct.fields[fieldIndex].type.unpacked;
+        wrap(node.receiver, receiverType);
+        b.struct_get(struct, fieldIndex);
+        return fieldType;
+      } else {
+        // Instance call of getter
+        assert(singleTarget is Procedure && singleTarget.isGetter);
+        w.ValueType? intrinsicResult =
+            intrinsifier.getInstanceGetterIntrinsic(node);
+        if (intrinsicResult != null) return intrinsicResult;
+        w.BaseFunction targetFunction =
+            translator.functions.getFunction(singleTarget.reference);
+        wrap(node.receiver, targetFunction.type.inputs.single);
+        return _call(singleTarget.reference);
+      }
+    } else {
+      return _virtualCall(node.interfaceTarget, node.receiver, (_) {},
+          getter: true, setter: false);
+    }
+  }
+
+  @override
+  w.ValueType visitInstanceSet(InstanceSet node, w.ValueType expectedType) {
+    bool preserved = expectedType != voidMarker;
+    w.Local? temp;
+    Member? singleTarget = translator.singleTarget(node);
+    if (singleTarget != null) {
+      if (singleTarget is Field) {
+        w.StructType struct =
+            translator.classInfo[singleTarget.enclosingClass]!.struct;
+        int fieldIndex = translator.fieldIndex[singleTarget]!;
+        w.ValueType receiverType = w.RefType.def(struct, nullable: true);
+        w.ValueType fieldType = struct.fields[fieldIndex].type.unpacked;
+        wrap(node.receiver, receiverType);
+        wrap(node.value, fieldType);
+        if (preserved) {
+          temp = function.addLocal(fieldType);
+          b.local_tee(temp);
+        }
+        b.struct_set(struct, fieldIndex);
+      } else {
+        w.BaseFunction targetFunction =
+            translator.functions.getFunction(singleTarget.reference);
+        w.ValueType paramType = targetFunction.type.inputs.last;
+        wrap(node.receiver, targetFunction.type.inputs.first);
+        wrap(node.value, paramType);
+        if (preserved) {
+          temp = function.addLocal(typeForLocal(paramType));
+          b.local_tee(temp);
+          translator.convertType(function, temp.type, paramType);
+        }
+        _call(singleTarget.reference);
+      }
+    } else {
+      _virtualCall(node.interfaceTarget, node.receiver, (signature) {
+        w.ValueType paramType = signature.inputs.last;
+        wrap(node.value, paramType);
+        if (preserved) {
+          temp = function.addLocal(paramType);
+          b.local_tee(temp!);
+        }
+      }, getter: false, setter: true);
     }
     if (preserved) {
       b.local_get(temp!);
-    }
-  }
-
-  @override
-  void visitInstanceGet(InstanceGet node) {
-    wrap(node.receiver);
-    Member? singleTarget = translator.singleTarget(node);
-    if (singleTarget != null) {
-      if (singleTarget is Field) {
-        w.StructType struct =
-            translator.classInfo[singleTarget.enclosingClass]!.struct;
-        int fieldIndex = translator.fieldIndex[singleTarget]!;
-        b.struct_get(struct, fieldIndex);
-      } else {
-        assert(singleTarget is Procedure && singleTarget.isGetter);
-        _call(singleTarget.reference);
-      }
+      return temp!.type;
     } else {
-      _virtualCall(node.interfaceTarget, () {}, getter: true, setter: false);
+      return voidMarker;
     }
-  }
-
-  @override
-  void visitInstanceSet(InstanceSet node) {
-    wrap(node.receiver);
-    bool preserved = bodyAnalyzer.preserved.contains(node);
-    w.Local? temp = preserved
-        ? function
-            .addLocal(translateType(node.value.getStaticType(typeContext)))
-        : null;
-    Member? singleTarget = translator.singleTarget(node);
-    if (singleTarget != null) {
-      wrap(node.value);
-      if (preserved) b.local_tee(temp!);
-      if (singleTarget is Field) {
-        w.StructType struct =
-            translator.classInfo[singleTarget.enclosingClass]!.struct;
-        int fieldIndex = translator.fieldIndex[singleTarget]!;
-        b.struct_set(struct, fieldIndex);
-      } else {
-        _call(singleTarget.reference);
-      }
-    } else {
-      _virtualCall(node.interfaceTarget, () {
-        wrap(node.value);
-        if (preserved) b.local_tee(temp!);
-      }, getter: false, setter: true);
-    }
-    if (preserved) b.local_get(temp!);
   }
 
   @override
@@ -925,8 +992,10 @@ class CodeGenerator extends ExpressionVisitor<void>
   }
 
   @override
-  void visitFunctionExpression(FunctionExpression node) {
-    _instantiateClosure(node.function);
+  w.ValueType visitFunctionExpression(
+      FunctionExpression node, w.ValueType expectedType) {
+    w.StructType struct = _instantiateClosure(node.function);
+    return w.RefType.def(struct, nullable: false);
   }
 
   w.StructType _instantiateClosure(FunctionNode functionNode) {
@@ -962,65 +1031,74 @@ class CodeGenerator extends ExpressionVisitor<void>
   }
 
   @override
-  void visitFunctionInvocation(FunctionInvocation node) {
+  w.ValueType visitFunctionInvocation(
+      FunctionInvocation node, w.ValueType expectedType) {
     FunctionType functionType = node.functionType!;
     int parameterCount = functionType.requiredParameterCount;
     w.StructType struct = translator.functionStructType(parameterCount);
     w.Local temp = function.addLocal(typeForLocal(translateType(functionType)));
-    wrap(node.receiver);
+    wrap(node.receiver, temp.type);
     b.local_tee(temp);
     b.struct_get(struct, 1); // Context
     for (Expression arg in node.arguments.positional) {
-      wrap(arg);
+      wrap(arg, translator.nullableObjectType);
     }
     b.local_get(temp);
     b.struct_get(struct, 2); // Function
     b.call_ref();
+    return translator.nullableObjectType;
   }
 
   @override
-  void visitLocalFunctionInvocation(LocalFunctionInvocation node) {
+  w.ValueType visitLocalFunctionInvocation(
+      LocalFunctionInvocation node, w.ValueType expectedType) {
     var decl = node.variable.parent as FunctionDeclaration;
     _pushContext(decl.function);
     for (Expression arg in node.arguments.positional) {
-      wrap(arg);
+      wrap(arg, translator.nullableObjectType);
     }
     Lambda lambda = closures.lambdas[decl.function]!;
     b.call(lambda.function);
+    return translator.nullableObjectType;
   }
 
   @override
-  void visitLogicalExpression(LogicalExpression node) {
+  w.ValueType visitLogicalExpression(
+      LogicalExpression node, w.ValueType expectedType) {
     _conditional(node, () => b.i32_const(1), () => b.i32_const(0),
         const [w.NumType.i32]);
+    return w.NumType.i32;
   }
 
   @override
-  void visitNot(Not node) {
-    wrap(node.operand);
+  w.ValueType visitNot(Not node, w.ValueType expectedType) {
+    wrap(node.operand, w.NumType.i32);
     b.i32_eqz();
+    return w.NumType.i32;
   }
 
   @override
-  void visitConditionalExpression(ConditionalExpression node) {
-    w.ValueType? type = bodyAnalyzer.expressionType[node]!;
+  w.ValueType visitConditionalExpression(
+      ConditionalExpression node, w.ValueType expectedType) {
     _conditional(
         node.condition,
-        () => wrap(node.then),
-        () => wrap(node.otherwise),
-        [if (type != null && type != voidMarker) type]);
+        () => wrap(node.then, expectedType),
+        () => wrap(node.otherwise, expectedType),
+        [if (expectedType != null && expectedType != voidMarker) expectedType]);
+    return expectedType;
   }
 
   @override
-  void visitNullCheck(NullCheck node) {
-    wrap(node.operand);
+  w.ValueType visitNullCheck(NullCheck node, w.ValueType expectedType) {
+    // TODO: Check and throw exception
+    return wrap(node.operand, expectedType);
   }
 
   void _visitArguments(Arguments node, Reference target, int signatureOffset) {
     final w.FunctionType signature = translator.signatureFor(target);
     final ParameterInfo paramInfo = translator.paramInfoFor(target);
-    for (Expression arg in node.positional) {
-      wrap(arg);
+    for (int i = 0; i < node.positional.length; i++) {
+      wrap(node.positional[i], signature.inputs[signatureOffset + i]);
     }
     // Default values for positional parameters
     for (int i = node.positional.length; i < paramInfo.positional.length; i++) {
@@ -1035,7 +1113,7 @@ class CodeGenerator extends ExpressionVisitor<void>
           .inputs[signatureOffset + paramInfo.nameIndex[namedArg.name]!];
       final w.Local namedLocal = function.addLocal(typeForLocal(type));
       namedLocals[namedArg.name] = namedLocal;
-      wrap(namedArg.value);
+      wrap(namedArg.value, namedLocal.type);
       b.local_set(namedLocal);
     }
     for (String name in paramInfo.names) {
@@ -1053,60 +1131,70 @@ class CodeGenerator extends ExpressionVisitor<void>
   }
 
   @override
-  void visitStringConcatenation(StringConcatenation node) {
+  w.ValueType visitStringConcatenation(
+      StringConcatenation node, w.ValueType expectedType) {
     // TODO: Call toString and concatenate
     for (Expression expression in node.expressions) {
-      wrap(expression);
+      wrap(expression, translator.nullableObjectType);
       b.drop();
     }
     ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
     b.i32_const(info.classId);
     b.global_get(info.rtt);
     b.struct_new_with_rtt(info.struct);
+    return w.RefType.def(info.struct, nullable: false);
   }
 
   @override
-  void visitThrow(Throw node) {
-    wrap(node.expression);
+  w.ValueType visitThrow(Throw node, w.ValueType expectedType) {
+    wrap(node.expression, translator.nullableObjectType);
     // TODO: Throw exception
     b.unreachable();
+    return expectedType;
   }
 
   @override
-  void visitConstantExpression(ConstantExpression node) {
-    translator.constants.instantiateConstant(
-        function, node.constant, bodyAnalyzer.expressionType[node]);
-  }
-
-  @override
-  void visitNullLiteral(NullLiteral node) {
-    translator.constants.instantiateConstant(
-        function, NullConstant(), bodyAnalyzer.expressionType[node]);
-  }
-
-  @override
-  void visitStringLiteral(StringLiteral node) {
+  w.ValueType visitConstantExpression(
+      ConstantExpression node, w.ValueType expectedType) {
     translator.constants
-        .instantiateConstant(function, StringConstant(node.value), null);
+        .instantiateConstant(function, node.constant, expectedType);
+    return expectedType;
   }
 
   @override
-  void visitBoolLiteral(BoolLiteral node) {
+  w.ValueType visitNullLiteral(NullLiteral node, w.ValueType expectedType) {
+    translator.constants
+        .instantiateConstant(function, NullConstant(), expectedType);
+    return expectedType;
+  }
+
+  @override
+  w.ValueType visitStringLiteral(StringLiteral node, w.ValueType expectedType) {
+    translator.constants.instantiateConstant(
+        function, StringConstant(node.value), expectedType);
+    return expectedType;
+  }
+
+  @override
+  w.ValueType visitBoolLiteral(BoolLiteral node, w.ValueType expectedType) {
     b.i32_const(node.value ? 1 : 0);
+    return w.NumType.i32;
   }
 
   @override
-  void visitIntLiteral(IntLiteral node) {
+  w.ValueType visitIntLiteral(IntLiteral node, w.ValueType expectedType) {
     b.i64_const(node.value);
+    return w.NumType.i64;
   }
 
   @override
-  void visitDoubleLiteral(DoubleLiteral node) {
+  w.ValueType visitDoubleLiteral(DoubleLiteral node, w.ValueType expectedType) {
     b.f64_const(node.value);
+    return w.NumType.f64;
   }
 
   @override
-  void visitIsExpression(IsExpression node) {
+  w.ValueType visitIsExpression(IsExpression node, w.ValueType expectedType) {
     DartType type = node.type;
     if (type is! InterfaceType) throw "Unsupported type in 'is' check: $type";
     Class? singular = null;
@@ -1118,22 +1206,23 @@ class CodeGenerator extends ExpressionVisitor<void>
         singular = subclass;
       }
     }
-    wrap(node.operand);
+    wrap(node.operand, translator.nullableObjectType);
     if (singular == null) {
       b.drop();
       b.i32_const(0);
-      return;
+    } else {
+      ClassInfo info = translator.classInfo[singular]!;
+      b.struct_get(object.struct, 0);
+      b.i32_const(info.classId);
+      b.i32_eq();
     }
-    ClassInfo info = translator.classInfo[singular]!;
-    b.struct_get(object.struct, 0);
-    b.i32_const(info.classId);
-    b.i32_eq();
+    return w.NumType.i32;
   }
 
   @override
-  void visitAsExpression(AsExpression node) {
-    wrap(node.operand);
+  w.ValueType visitAsExpression(AsExpression node, w.ValueType expectedType) {
     // TODO: Check
+    return wrap(node.operand, expectedType);
   }
 }
 

@@ -48,6 +48,8 @@ class Capture {
   bool written = false;
 
   Capture(this.variable);
+
+  w.ValueType get type => context.struct.fields[fieldIndex].type.unpacked;
 }
 
 class Closures {
