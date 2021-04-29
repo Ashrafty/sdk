@@ -92,11 +92,11 @@ class Instructions with SerializerMixin {
 
   String get trace => _traceLines.join();
 
-  void _debugTrace(List<Object> trace,
+  bool _debugTrace(List<Object>? trace,
       {required bool reachableAfter,
       int indentBefore = 0,
       int indentAfter = 0}) {
-    if (traceEnabled) {
+    if (traceEnabled && trace != null) {
       _indent += indentBefore;
       String instr = "  " * _indent + trace.join(" ");
       instr = instr.length > instructionColumnWidth - 2
@@ -108,6 +108,7 @@ class Instructions with SerializerMixin {
 
       _traceLines.add(line);
     }
+    return true;
   }
 
   Never _reportError(String error) {
@@ -158,8 +159,7 @@ class Instructions with SerializerMixin {
       List<ValueType> Function(List<ValueType>) outputsFun,
       {List<Object>? trace, bool reachableAfter = true}) {
     if (!reachable) {
-      if (trace != null) _debugTrace(trace, reachableAfter: false);
-      return true;
+      return _debugTrace(trace, reachableAfter: false);
     }
     if (_stackTypes.length - inputs.length < _topOfLabelStack.baseStackHeight) {
       _reportError("Underflowing base stack of innermost block");
@@ -167,8 +167,7 @@ class Instructions with SerializerMixin {
     final List<ValueType> stack = _checkStackTypes(inputs);
     _stackTypes.length -= inputs.length;
     _stackTypes.addAll(outputsFun(stack));
-    if (trace != null) _debugTrace(trace, reachableAfter: reachableAfter);
-    return true;
+    return _debugTrace(trace, reachableAfter: reachableAfter);
   }
 
   bool _verifyBranchTypes(Label label,
@@ -191,10 +190,9 @@ class Instructions with SerializerMixin {
   }
 
   bool _verifyStartOfBlock(Label label, {required List<Object> trace}) {
-    _debugTrace(
+    return _debugTrace(
         ["$label:", ...trace, FunctionType(label.inputs, label.outputs)],
         reachableAfter: true, indentAfter: 1);
-    return true;
   }
 
   bool _verifyEndOfBlock(List<ValueType> outputs,
@@ -213,11 +211,10 @@ class Instructions with SerializerMixin {
     assert(_stackTypes.length >= label.baseStackHeight);
     _stackTypes.length = label.baseStackHeight;
     _stackTypes.addAll(outputs);
-    _debugTrace([if (label.hasIndex) "$label:", ...trace],
+    return _debugTrace([if (label.hasIndex) "$label:", ...trace],
         reachableAfter: reachableAfter,
         indentBefore: -1,
         indentAfter: reindent ? 1 : 0);
-    return true;
   }
 
   // Control instructions
@@ -362,6 +359,9 @@ class Instructions with SerializerMixin {
   }
 
   bool _verifyCallRef() {
+    if (!reachable) {
+      return _debugTrace(['call_ref'], reachableAfter: false);
+    }
     ValueType fun = _topOfStack;
     if (fun is RefType) {
       var heapType = fun.heapType;
@@ -644,6 +644,9 @@ class Instructions with SerializerMixin {
   }
 
   bool _verifyRttSub(DataType subType) {
+    if (!reachable) {
+      return _debugTrace(['rtt.sub', subType], reachableAfter: false);
+    }
     final ValueType input = _topOfStack;
     if (input is! Rtt) _reportError("Expected rtt, but stack contained $input");
     final int? depth = input.depth;
@@ -664,6 +667,9 @@ class Instructions with SerializerMixin {
 
   bool _verifyCast(List<ValueType> Function(List<ValueType>) outputsFun,
       {List<Object>? trace}) {
+    if (!reachable) {
+      return _debugTrace(trace, reachableAfter: false);
+    }
     final stack = _stack(2);
     final ValueType value = stack[0];
     final ValueType rtt = stack[1];
