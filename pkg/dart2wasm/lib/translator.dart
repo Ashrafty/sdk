@@ -139,9 +139,6 @@ class Translator {
     dummyContext = m.addStructType("<context>");
 
     ClassInfoCollector(this).collect();
-    nonNullableObjectType =
-        w.RefType.def(classes.first.struct, nullable: false);
-    nullableObjectType = w.RefType.def(classes.first.struct, nullable: true);
     globals = Globals(this);
     constants = Constants(this);
 

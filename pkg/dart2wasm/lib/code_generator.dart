@@ -1084,7 +1084,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         node.condition,
         () => wrap(node.then, expectedType),
         () => wrap(node.otherwise, expectedType),
-        [if (expectedType != null && expectedType != voidMarker) expectedType]);
+        [if (expectedType != voidMarker) expectedType]);
     return expectedType;
   }
 

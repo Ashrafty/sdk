@@ -77,6 +77,9 @@ class ClassInfoCollector {
         final w.StructType struct = m.addStructType(cls.name);
         final w.DefinedGlobal rtt = makeRtt(m, struct, null);
         info = ClassInfo(cls, nextClassId++, 0, struct, rtt);
+        translator.nonNullableObjectType =
+            w.RefType.def(struct, nullable: false);
+        translator.nullableObjectType = w.RefType.def(struct, nullable: true);
       } else {
         initialize(superclass);
         for (Supertype interface in cls.implementedTypes) {
