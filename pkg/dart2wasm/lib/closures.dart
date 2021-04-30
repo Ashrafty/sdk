@@ -90,8 +90,8 @@ class Closures {
                 w.RefType.def(context.parent!.struct, nullable: true)));
           }
           if (context.containsThis) {
-            struct.fields.add(
-                w.FieldType(codeGen.thisLocal!.type.withNullability(true)));
+            struct.fields.add(w.FieldType(
+                codeGen.preciseThisLocal!.type.withNullability(true)));
           }
           for (VariableDeclaration variable in context.variables) {
             int index = struct.fields.length;

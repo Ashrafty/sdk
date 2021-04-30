@@ -32,6 +32,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
+  w.Local? preciseThisLocal;
   List<Statement> finalizers = [];
 
   late w.Instructions b;
@@ -132,38 +133,40 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
     closures.findCaptures(member.function!);
 
-    if (member is Constructor) {
+    if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       thisLocal = paramLocals[0];
-      if (!options.stubBodies) {
-        Class cls = member.enclosingClass;
-        for (Field field in cls.fields) {
-          if (field.isInstanceMember && field.initializer != null) {
-            int fieldIndex = translator.fieldIndex[field]!;
-            b.local_get(thisLocal!);
-            wrap(field.initializer!,
-                info.struct.fields[fieldIndex].type.unpacked);
-            b.struct_set(info.struct, fieldIndex);
-          }
-        }
-        for (Initializer initializer in member.initializers) {
-          initializer.accept(this);
-        }
-      }
-    } else if (implicitParams == 1) {
-      ClassInfo info = translator.classInfo[member.enclosingClass]!;
       w.RefType thisType = w.RefType.def(info.repr.struct, nullable: false);
       if (translator.needsConversion(paramLocals[0].type, thisType)) {
-        thisLocal = function.addLocal(typeForLocal(thisType));
+        preciseThisLocal = function.addLocal(typeForLocal(thisType));
         b.local_get(paramLocals[0]);
         b.global_get(info.rtt);
         b.ref_cast();
-        b.local_set(thisLocal!);
+        b.local_set(preciseThisLocal!);
       } else {
-        thisLocal = paramLocals[0];
+        preciseThisLocal = paramLocals[0];
+      }
+
+      if (member is Constructor) {
+        if (!options.stubBodies) {
+          Class cls = member.enclosingClass;
+          for (Field field in cls.fields) {
+            if (field.isInstanceMember && field.initializer != null) {
+              int fieldIndex = translator.fieldIndex[field]!;
+              b.local_get(thisLocal!);
+              wrap(field.initializer!,
+                  info.struct.fields[fieldIndex].type.unpacked);
+              b.struct_set(info.struct, fieldIndex);
+            }
+          }
+          for (Initializer initializer in member.initializers) {
+            initializer.accept(this);
+          }
+        }
       }
     } else {
       thisLocal = null;
+      preciseThisLocal = null;
     }
 
     closures.buildContexts(member.function!);
@@ -225,6 +228,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       if (context.containsThis) {
         thisLocal = function.addLocal(typeForLocal(
             context.struct.fields[context.thisFieldIndex].type.unpacked));
+        preciseThisLocal = thisLocal;
         b.struct_get(context.struct, context.thisFieldIndex);
         b.local_set(thisLocal!);
       }
@@ -256,7 +260,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.local_set(contextLocal);
       if (context.containsThis) {
         b.local_get(contextLocal);
-        b.local_get(thisLocal!);
+        b.local_get(preciseThisLocal!);
         b.struct_set(context.struct, context.thisFieldIndex);
       }
       if (context.parent != null) {
@@ -591,8 +595,18 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitThisExpression(
       ThisExpression node, w.ValueType expectedType) {
-    b.local_get(thisLocal!);
-    return thisLocal!.type;
+    return _visitThis(expectedType);
+  }
+
+  w.ValueType _visitThis(w.ValueType expectedType) {
+    if (!thisLocal!.type.isSubtypeOf(expectedType) &&
+        preciseThisLocal!.type.isSubtypeOf(expectedType)) {
+      b.local_get(preciseThisLocal!);
+      return preciseThisLocal!.type;
+    } else {
+      b.local_get(thisLocal!);
+      return thisLocal!.type;
+    }
   }
 
   @override
@@ -632,8 +646,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitSuperMethodInvocation(
       SuperMethodInvocation node, w.ValueType expectedType) {
-    b.local_get(thisLocal!);
-    if (options.parameterNullability && thisLocal!.type.nullable) {
+    w.ValueType thisType = _visitThis(expectedType);
+    if (options.parameterNullability && thisType.nullable) {
       b.ref_as_non_null();
     }
     _visitArguments(node.arguments, node.interfaceTargetReference!, 1);
