@@ -15,13 +15,15 @@ import 'package:vm/metadata/table_selector.dart';
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class SelectorInfo {
+  final Translator translator;
+
   final int id;
   final int callCount;
   final ParameterInfo paramInfo;
   int returnCount;
 
   final Map<int, Reference> targets = {};
-  late final w.FunctionType signature;
+  late w.FunctionType signature = computeSignature();
 
   late final List<int> classIds;
   late final int targetCount;
@@ -32,7 +34,86 @@ class SelectorInfo {
 
   int get sortWeight => classIds.length * 10 + callCount;
 
-  SelectorInfo(this.id, this.callCount, this.paramInfo, this.returnCount);
+  SelectorInfo(this.translator, this.id, this.callCount, this.paramInfo,
+      this.returnCount);
+
+  w.FunctionType computeSignature() {
+    var nameIndex = paramInfo.nameIndex;
+    List<Set<ClassInfo>> inputSets =
+        List.generate(1 + paramInfo.paramCount, (_) => {});
+    List<Set<ClassInfo>> outputSets = List.generate(returnCount, (_) => {});
+    List<bool> inputNullable = List.filled(1 + paramInfo.paramCount, false);
+    List<bool> outputNullable = List.filled(returnCount, false);
+    targets.forEach((id, target) {
+      ClassInfo receiver = translator.classes[id];
+      List<DartType> positional;
+      Map<String, DartType> named;
+      List<DartType> returns;
+      Member member = target.asMember;
+      if (member is Field) {
+        if (target.isImplicitGetter) {
+          positional = [];
+          named = {};
+          returns = [member.getterType];
+        } else {
+          positional = [member.setterType];
+          named = {};
+          returns = [];
+        }
+      } else {
+        FunctionNode function = member.function!;
+        positional = [
+          for (VariableDeclaration param in function.positionalParameters)
+            param.type
+        ];
+        named = {
+          for (VariableDeclaration param in function.namedParameters)
+            param.name!: param.type
+        };
+        returns = function.returnType is VoidType ? [] : [function.returnType];
+      }
+      assert(returns.length <= outputSets.length);
+      inputSets[0].add(receiver);
+      for (int i = 0; i < positional.length; i++) {
+        DartType type = positional[i];
+        inputSets[1 + i]
+            .add(translator.classInfo[translator.classForType(type)]!);
+        inputNullable[1 + i] |= type.isPotentiallyNullable;
+      }
+      for (String name in named.keys) {
+        int i = nameIndex[name]!;
+        DartType type = named[name]!;
+        inputSets[1 + i]
+            .add(translator.classInfo[translator.classForType(type)]!);
+        inputNullable[1 + i] |= type.isPotentiallyNullable;
+      }
+      for (int i = 0; i < returnCount; i++) {
+        if (i < returns.length) {
+          outputSets[i]
+              .add(translator.classInfo[translator.classForType(returns[i])]!);
+          outputNullable[i] |= returns[i].isPotentiallyNullable;
+        } else {
+          outputNullable[i] = true;
+        }
+      }
+    });
+    List<w.ValueType> inputs = List.generate(
+        inputSets.length,
+        (i) => translator.translateType(InterfaceType(
+            upperBound(inputSets[i]).cls,
+            inputNullable[i]
+                ? Nullability.nullable
+                : Nullability.nonNullable)));
+    inputs[0] = translator.ensureBoxed(inputs[0]);
+    List<w.ValueType> outputs = List.generate(
+        outputSets.length,
+        (i) => translator.translateType(InterfaceType(
+            upperBound(outputSets[i]).cls,
+            outputNullable[i]
+                ? Nullability.nullable
+                : Nullability.nonNullable)));
+    return translator.m.addFunctionType(inputs, outputs);
+  }
 }
 
 class DispatchTable {
@@ -59,8 +140,8 @@ class DispatchTable {
         : 0;
     var selector = selectorInfo.putIfAbsent(
         selectorId,
-        () => SelectorInfo(selectorId, selectorMetadata[selectorId].callCount,
-            paramInfo, returnCount));
+        () => SelectorInfo(translator, selectorId,
+            selectorMetadata[selectorId].callCount, paramInfo, returnCount));
     selector.paramInfo.merge(paramInfo);
     selector.returnCount = max(selector.returnCount, returnCount);
     return selector;
@@ -98,88 +179,6 @@ class DispatchTable {
         }
       }
       selectorsInClass.add(selectorIds);
-    }
-
-    // Compute signatures
-    for (SelectorInfo selector in selectorInfo.values) {
-      var nameIndex = selector.paramInfo.nameIndex;
-      List<Set<ClassInfo>> inputSets =
-          List.generate(1 + selector.paramInfo.paramCount, (_) => {});
-      List<Set<ClassInfo>> outputSets =
-          List.generate(selector.returnCount, (_) => {});
-      List<bool> inputNullable =
-          List.filled(1 + selector.paramInfo.paramCount, false);
-      List<bool> outputNullable = List.filled(selector.returnCount, false);
-      selector.targets.forEach((id, target) {
-        ClassInfo receiver = translator.classes[id];
-        List<DartType> positional;
-        Map<String, DartType> named;
-        List<DartType> returns;
-        Member member = target.asMember;
-        if (member is Field) {
-          if (target.isImplicitGetter) {
-            positional = [];
-            named = {};
-            returns = [member.getterType];
-          } else {
-            positional = [member.setterType];
-            named = {};
-            returns = [];
-          }
-        } else {
-          FunctionNode function = member.function!;
-          positional = [
-            for (VariableDeclaration param in function.positionalParameters)
-              param.type
-          ];
-          named = {
-            for (VariableDeclaration param in function.namedParameters)
-              param.name!: param.type
-          };
-          returns =
-              function.returnType is VoidType ? [] : [function.returnType];
-        }
-        assert(returns.length <= outputSets.length);
-        inputSets[0].add(receiver);
-        for (int i = 0; i < positional.length; i++) {
-          DartType type = positional[i];
-          inputSets[1 + i]
-              .add(translator.classInfo[translator.classForType(type)]!);
-          inputNullable[1 + i] |= type.isPotentiallyNullable;
-        }
-        for (String name in named.keys) {
-          int i = nameIndex[name]!;
-          DartType type = named[name]!;
-          inputSets[1 + i]
-              .add(translator.classInfo[translator.classForType(type)]!);
-          inputNullable[1 + i] |= type.isPotentiallyNullable;
-        }
-        for (int i = 0; i < selector.returnCount; i++) {
-          if (i < returns.length) {
-            outputSets[i].add(
-                translator.classInfo[translator.classForType(returns[i])]!);
-            outputNullable[i] |= returns[i].isPotentiallyNullable;
-          } else {
-            outputNullable[i] = true;
-          }
-        }
-      });
-      List<w.ValueType> inputs = List.generate(
-          inputSets.length,
-          (i) => translator.translateType(InterfaceType(
-              upperBound(inputSets[i]).cls,
-              inputNullable[i]
-                  ? Nullability.nullable
-                  : Nullability.nonNullable)));
-      inputs[0] = translator.ensureBoxed(inputs[0]);
-      List<w.ValueType> outputs = List.generate(
-          outputSets.length,
-          (i) => translator.translateType(InterfaceType(
-              upperBound(outputSets[i]).cls,
-              outputNullable[i]
-                  ? Nullability.nullable
-                  : Nullability.nonNullable)));
-      selector.signature = translator.m.addFunctionType(inputs, outputs);
     }
 
     // Build lists of class IDs and count targets
