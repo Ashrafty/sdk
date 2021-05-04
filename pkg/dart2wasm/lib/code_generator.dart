@@ -7,6 +7,7 @@ import 'package:dart2wasm/closures.dart';
 import 'package:dart2wasm/dispatch_table.dart';
 import 'package:dart2wasm/intrinsics.dart';
 import 'package:dart2wasm/param_info.dart';
+import 'package:dart2wasm/tearoff_reference.dart';
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
@@ -70,6 +71,27 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
     Member member = reference.asMember;
     b = function.body;
+
+    if (reference.isTearOffReference) {
+      w.DefinedFunction closureFunction =
+          translator.getTearOffFunction(member as Procedure);
+
+      int parameterCount = member.function.requiredParameterCount;
+      w.DefinedGlobal global = translator.makeFunctionRef(closureFunction);
+
+      ClassInfo info = translator.classInfo[translator.functionClass]!;
+      w.StructType struct = translator.functionStructType(parameterCount);
+      w.DefinedGlobal rtt = translator.functionTypeRtt[parameterCount]!;
+
+      b.i32_const(info.classId);
+      b.local_get(function.locals[0]);
+      b.global_get(global);
+      b.global_get(rtt);
+      b.struct_new_with_rtt(struct);
+      b.end();
+      return;
+    }
+
     if (member.isExternal) {
       b.unreachable();
       b.end();
@@ -867,6 +889,13 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   @override
+  w.ValueType visitStaticTearOff(StaticTearOff node, w.ValueType expectedType) {
+    translator.constants.instantiateConstant(
+        function, TearOffConstant(node.target), expectedType);
+    return expectedType;
+  }
+
+  @override
   w.ValueType visitStaticSet(StaticSet node, w.ValueType expectedType) {
     bool preserved = expectedType != voidMarker;
     Member target = node.target;
@@ -928,6 +957,13 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       return _virtualCall(node.interfaceTarget, node.receiver, (_) {},
           getter: true, setter: false);
     }
+  }
+
+  @override
+  w.ValueType visitInstanceTearOff(
+      InstanceTearOff node, w.ValueType expectedType) {
+    return _virtualCall(node.interfaceTarget, node.receiver, (_) {},
+        getter: true, setter: false);
   }
 
   @override

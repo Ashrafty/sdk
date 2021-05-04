@@ -2,8 +2,9 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:dart2wasm/translator.dart';
 import 'package:dart2wasm/dispatch_table.dart';
+import 'package:dart2wasm/tearoff_reference.dart';
+import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/external_name.dart';
@@ -55,7 +56,9 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
   w.BaseFunction getFunction(Reference target) {
     return _functions.putIfAbsent(target, () {
       pending.add(target);
-      w.FunctionType ftype = target.asMember.accept1(this, target);
+      w.FunctionType ftype = target.isTearOffReference
+          ? translator.dispatchTable.selectorForTarget(target).signature
+          : target.asMember.accept1(this, target);
       return m.addFunction(ftype);
     });
   }

@@ -81,6 +81,7 @@ class Translator {
   Map<w.StructType, int> functionTypeParameterCount = {};
   Map<int, w.DefinedGlobal> functionTypeRtt = {};
   Map<w.DefinedFunction, w.DefinedGlobal> functionRefCache = {};
+  Map<Procedure, w.DefinedFunction> tearOffFunctionCache = {};
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
       this.tableSelectorAssigner, this.options)
@@ -322,6 +323,36 @@ class Translator {
       global.initializer.ref_func(f);
       global.initializer.end();
       return global;
+    });
+  }
+
+  w.DefinedFunction getTearOffFunction(Procedure member) {
+    return tearOffFunctionCache.putIfAbsent(member, () {
+      assert(member.kind == ProcedureKind.Method);
+      FunctionNode functionNode = member.function;
+      int parameterCount = functionNode.requiredParameterCount;
+      if (functionNode.positionalParameters.length != parameterCount ||
+          functionNode.namedParameters.isNotEmpty) {
+        throw "Tear-off with optional parameters not supported";
+      }
+      w.FunctionType memberSignature = signatureFor(member.reference);
+      w.FunctionType closureSignature = functionType(parameterCount);
+      int signatureOffset = member.isInstanceMember ? 1 : 0;
+      assert(memberSignature.inputs.length == signatureOffset + parameterCount);
+      assert(closureSignature.inputs.length == 1 + parameterCount);
+      w.DefinedFunction function = m.addFunction(closureSignature);
+      w.BaseFunction target = functions.getFunction(member.reference);
+      w.Instructions b = function.body;
+      for (int i = 0; i < memberSignature.inputs.length; i++) {
+        w.Local paramLocal = function.locals[(1 - signatureOffset) + i];
+        b.local_get(paramLocal);
+        convertType(function, paramLocal.type, memberSignature.inputs[i]);
+      }
+      b.call(target);
+      convertType(function, outputOrVoid(target.type.outputs),
+          outputOrVoid(closureSignature.outputs));
+      b.end();
+      return function;
     });
   }
 

@@ -6,6 +6,7 @@ import 'dart:math';
 
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/param_info.dart';
+import 'package:dart2wasm/tearoff_reference.dart';
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
@@ -19,6 +20,7 @@ class SelectorInfo {
 
   final int id;
   final int callCount;
+  final bool tornOff;
   final ParameterInfo paramInfo;
   int returnCount;
 
@@ -34,8 +36,8 @@ class SelectorInfo {
 
   int get sortWeight => classIds.length * 10 + callCount;
 
-  SelectorInfo(this.translator, this.id, this.callCount, this.paramInfo,
-      this.returnCount);
+  SelectorInfo(this.translator, this.id, this.callCount, this.tornOff,
+      this.paramInfo, this.returnCount);
 
   w.FunctionType computeSignature() {
     var nameIndex = paramInfo.nameIndex;
@@ -62,15 +64,22 @@ class SelectorInfo {
         }
       } else {
         FunctionNode function = member.function!;
-        positional = [
-          for (VariableDeclaration param in function.positionalParameters)
-            param.type
-        ];
-        named = {
-          for (VariableDeclaration param in function.namedParameters)
-            param.name!: param.type
-        };
-        returns = function.returnType is VoidType ? [] : [function.returnType];
+        if (target.isTearOffReference) {
+          positional = [];
+          named = {};
+          returns = [function.computeFunctionType(Nullability.nonNullable)];
+        } else {
+          positional = [
+            for (VariableDeclaration param in function.positionalParameters)
+              param.type
+          ];
+          named = {
+            for (VariableDeclaration param in function.namedParameters)
+              param.name!: param.type
+          };
+          returns =
+              function.returnType is VoidType ? [] : [function.returnType];
+        }
       }
       assert(returns.length <= outputSets.length);
       inputSets[0].add(receiver);
@@ -127,9 +136,8 @@ class DispatchTable {
       : selectorMetadata = translator.tableSelectorAssigner.metadata.selectors;
 
   SelectorInfo selectorForTarget(Reference target) {
-    // TODO: Tearoffs
     Member member = target.asMember;
-    bool isGetter = target.isGetter;
+    bool isGetter = target.isGetter || target.isTearOffReference;
     int selectorId = isGetter
         ? translator.tableSelectorAssigner.getterSelectorId(member)
         : translator.tableSelectorAssigner.methodOrSetterSelectorId(member);
@@ -140,8 +148,13 @@ class DispatchTable {
         : 0;
     var selector = selectorInfo.putIfAbsent(
         selectorId,
-        () => SelectorInfo(translator, selectorId,
-            selectorMetadata[selectorId].callCount, paramInfo, returnCount));
+        () => SelectorInfo(
+            translator,
+            selectorId,
+            selectorMetadata[selectorId].callCount,
+            selectorMetadata[selectorId].tornOff,
+            paramInfo,
+            returnCount));
     selector.paramInfo.merge(paramInfo);
     selector.returnCount = max(selector.returnCount, returnCount);
     return selector;
@@ -162,10 +175,11 @@ class DispatchTable {
         }
       }
 
-      void addMember(Reference reference) {
+      SelectorInfo addMember(Reference reference) {
         SelectorInfo selector = selectorForTarget(reference);
         selector.targets[info.classId] = reference;
         selectorIds.add(selector.id);
+        return selector;
       }
 
       for (Member member in info.cls.members) {
@@ -173,8 +187,11 @@ class DispatchTable {
           if (member is Field) {
             addMember(member.getterReference);
             if (member.hasSetter) addMember(member.setterReference!);
-          } else {
-            addMember(member.reference);
+          } else if (member is Procedure) {
+            SelectorInfo method = addMember(member.reference);
+            if (method.tornOff) {
+              addMember(member.tearOffReference);
+            }
           }
         }
       }

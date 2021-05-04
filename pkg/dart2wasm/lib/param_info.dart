@@ -2,6 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'package:dart2wasm/tearoff_reference.dart';
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
@@ -32,7 +33,10 @@ class ParameterInfo {
 
   ParameterInfo.fromMember(Reference target) : member = target.asMember {
     FunctionNode? function = member.function;
-    if (function != null) {
+    if (target.isTearOffReference) {
+      positional = [];
+      named = {};
+    } else if (function != null) {
       positional = List.generate(function.positionalParameters.length, (i) {
         if (i < function.requiredParameterCount) return null;
         return defaultValue(function.positionalParameters[i]);

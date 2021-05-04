@@ -121,6 +121,7 @@ class ConstantInstantiator extends ConstantVisitor<void> {
     b.struct_new_with_rtt(info.struct);
   }
 
+  @override
   void visitInstanceConstant(InstanceConstant constant) {
     ClassInfo info = translator.classInfo[constant.classNode]!;
     w.RefType type = w.RefType.def(info.struct, nullable: false);
@@ -145,6 +146,7 @@ class ConstantInstantiator extends ConstantVisitor<void> {
     });
   }
 
+  @override
   void visitListConstant(ListConstant constant) {
     // TODO: Use unmodifiable list
     ClassInfo info = translator.classInfo[translator.fixedLengthListClass]!;
@@ -178,5 +180,30 @@ class ConstantInstantiator extends ConstantVisitor<void> {
       b.global_get(info.rtt);
       b.struct_new_with_rtt(info.struct);
     });
+  }
+
+  @override
+  void visitTearOffConstant(TearOffConstant constant) {
+    w.DefinedFunction closureFunction =
+        translator.getTearOffFunction(constant.procedureReference.asProcedure);
+    int parameterCount = closureFunction.type.inputs.length - 1;
+    w.StructType struct = translator.functionStructType(parameterCount);
+    w.RefType type = w.RefType.def(struct, nullable: false);
+    instantiateLazyConstant(constant, type, (function) {
+      w.DefinedGlobal global = translator.makeFunctionRef(closureFunction);
+      ClassInfo info = translator.classInfo[translator.functionClass]!;
+      w.DefinedGlobal rtt = translator.functionTypeRtt[parameterCount]!;
+
+      w.Instructions b = function.body;
+      b.i32_const(info.classId);
+      // TODO: Put dummy context in global variable
+      b.rtt_canon(translator.dummyContext);
+      b.struct_new_with_rtt(translator.dummyContext);
+      b.global_get(global);
+      b.global_get(rtt);
+      b.struct_new_with_rtt(struct);
+    });
+    assert(expectedType == null ||
+        !translator.needsConversion(type, expectedType!));
   }
 }
