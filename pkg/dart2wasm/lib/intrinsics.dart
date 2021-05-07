@@ -12,6 +12,7 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class Intrinsifier {
   final CodeGenerator codeGen;
+  final w.ValueType boolType;
   final w.ValueType intType;
   final w.ValueType doubleType;
 
@@ -19,12 +20,6 @@ class Intrinsifier {
       binaryOperatorMap;
   late final Map<w.ValueType, Map<String, CodeGenCallback>> unaryOperatorMap;
   late final Map<String, w.ValueType> unaryResultMap;
-  late final Map<w.ValueType, Map<w.ValueType, Map<bool, CodeGenCallback>>>
-      equalsMap;
-
-  // Meaning of the `isNot` field of `EqualsCall`
-  static const bool isEquals = false;
-  static const bool isNotEquals = true;
 
   Translator get translator => codeGen.translator;
   w.Instructions get b => codeGen.b;
@@ -41,7 +36,8 @@ class Intrinsifier {
       op == '<' || op == '<=' || op == '>' || op == '>=';
 
   Intrinsifier(this.codeGen)
-      : intType = w.NumType.i64,
+      : boolType = w.NumType.i32,
+        intType = w.NumType.i64,
         doubleType = w.NumType.f64 {
     binaryOperatorMap = {
       intType: {
@@ -100,24 +96,9 @@ class Intrinsifier {
       'toDouble': w.NumType.f64,
       'toInt': w.NumType.i64,
     };
-
-    equalsMap = {
-      intType: {
-        intType: {
-          isEquals: (b) => b.i64_eq(),
-          isNotEquals: (b) => b.i64_ne(),
-        }
-      },
-      doubleType: {
-        doubleType: {
-          isEquals: (b) => b.f64_eq(),
-          isNotEquals: (b) => b.f64_ne(),
-        }
-      },
-    };
   }
 
-  w.ValueType? getInstanceGetterIntrinsic(InstanceGet node) {
+  w.ValueType? generateInstanceGetterIntrinsic(InstanceGet node) {
     DartType receiverType = dartTypeOf(node.receiver);
     String name = node.name.text;
     if (node.interfaceTarget.enclosingClass == translator.wasmArrayBaseClass) {
@@ -147,7 +128,7 @@ class Intrinsifier {
     }
   }
 
-  w.ValueType? getInstanceIntrinsic(InstanceInvocation node) {
+  w.ValueType? generateInstanceIntrinsic(InstanceInvocation node) {
     DartType receiverType = dartTypeOf(node.receiver);
     String name = node.name.text;
     if (node.interfaceTarget.enclosingClass?.superclass ==
@@ -244,9 +225,17 @@ class Intrinsifier {
     }
   }
 
-  w.ValueType? getEqualsIntrinsic(EqualsCall node) {
+  w.ValueType? generateEqualsIntrinsic(EqualsCall node) {
     w.ValueType leftType = translator.translateType(dartTypeOf(node.left));
     w.ValueType rightType = translator.translateType(dartTypeOf(node.right));
+
+    if (leftType == boolType && rightType == boolType) {
+      codeGen.wrap(node.left, w.NumType.i32);
+      codeGen.wrap(node.right, w.NumType.i32);
+      b.i32_eq();
+      return w.NumType.i32;
+    }
+
     if (leftType == intType && rightType == intType) {
       codeGen.wrap(node.left, w.NumType.i64);
       codeGen.wrap(node.right, w.NumType.i64);
@@ -262,7 +251,7 @@ class Intrinsifier {
     }
   }
 
-  w.ValueType? getStaticIntrinsic(StaticInvocation node) {
+  w.ValueType? generateStaticIntrinsic(StaticInvocation node) {
     if (node.target.enclosingLibrary == translator.coreTypes.coreLibrary &&
         node.name.text == "identical") {
       Expression first = node.arguments.positional[0];
@@ -302,5 +291,19 @@ class Intrinsifier {
       b.array_new_default_with_rtt(arrayType);
       return w.RefType.def(arrayType, nullable: false);
     }
+  }
+
+  bool generateMemberIntrinsic(Reference target, w.DefinedFunction function,
+      List<w.Local> paramLocals, w.Label? returnLabel) {
+    Member member = target.asMember;
+
+    if (member == translator.coreTypes.objectEquals) {
+      b.local_get(paramLocals[0]);
+      b.local_get(paramLocals[1]);
+      b.ref_eq();
+      return true;
+    }
+
+    return false;
   }
 }

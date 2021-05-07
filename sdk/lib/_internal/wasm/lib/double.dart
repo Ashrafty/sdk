@@ -58,10 +58,13 @@ class _BoxedDouble implements double {
   double operator -() native "Double_flipSignBit";
 
   bool operator ==(Object other) {
-    return (other is num) && _equal(other.toDouble());
+    return other is double
+        ? this == other // Intrinsic ==
+        : other is int
+            ? this == other.toDouble() // Intrinsic ==
+            : false;
   }
 
-  bool _equal(double other) native "Double_equal";
   bool _equalToInteger(int other) native "Double_equalToInteger";
 
   bool operator <(num other) {

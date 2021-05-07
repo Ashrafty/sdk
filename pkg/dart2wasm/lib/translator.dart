@@ -200,7 +200,7 @@ class Translator {
       if (member == mainFunction || options.exportAll) {
         m.exportFunction(exportName, function);
       }
-      codeGen.generate(reference, function);
+      codeGen.generate(reference, function, function.locals);
       if (options.printWasm) print(function.body.trace);
 
       for (Lambda lambda in codeGen.closures.lambdas.values) {

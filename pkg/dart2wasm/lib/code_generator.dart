@@ -66,7 +66,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   void generate(Reference reference, w.DefinedFunction function,
-      {List<w.Local>? inlinedLocals, w.Label? returnLabel}) {
+      List<w.Local> paramLocals,
+      {w.Label? returnLabel}) {
     closures = Closures(this);
 
     Member member = reference.asMember;
@@ -84,10 +85,16 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       w.DefinedGlobal rtt = translator.functionTypeRtt[parameterCount]!;
 
       b.i32_const(info.classId);
-      b.local_get(function.locals[0]);
+      b.local_get(paramLocals[0]);
       b.global_get(global);
       b.global_get(rtt);
       b.struct_new_with_rtt(struct);
+      b.end();
+      return;
+    }
+
+    if (intrinsifier.generateMemberIntrinsic(
+        reference, function, paramLocals, returnLabel)) {
       b.end();
       return;
     }
@@ -100,9 +107,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
     this.member = member;
     this.function = function;
-    typeContext = StaticTypeContext(member, translator.typeEnvironment);
-    paramLocals = inlinedLocals ?? function.locals;
+    this.paramLocals = paramLocals;
     this.returnLabel = returnLabel;
+    typeContext = StaticTypeContext(member, translator.typeEnvironment);
     returnType = translator
         .outputOrVoid(returnLabel?.targetTypes ?? function.type.outputs);
 
@@ -236,7 +243,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
     Context? context = closures.contexts[lambda.functionNode]?.parent;
     if (context != null) {
-      b.local_get(function.locals[0]);
+      b.local_get(paramLocals[0]);
       b.rtt_canon(context.struct);
       b.ref_cast();
       while (true) {
@@ -329,8 +336,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         b.local_set(local);
       }
       w.Label block = b.block([], targetFunction.type.outputs);
-      CodeGenerator(translator).generate(target, function,
-          inlinedLocals: inlinedLocals, returnLabel: block);
+      CodeGenerator(translator)
+          .generate(target, function, inlinedLocals, returnLabel: block);
     } else {
       b.call(targetFunction);
     }
@@ -665,7 +672,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitStaticInvocation(
       StaticInvocation node, w.ValueType expectedType) {
-    w.ValueType? intrinsicResult = intrinsifier.getStaticIntrinsic(node);
+    w.ValueType? intrinsicResult = intrinsifier.generateStaticIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
     _visitArguments(node.arguments, node.targetReference, 0);
     return _call(node.targetReference);
@@ -685,7 +692,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitInstanceInvocation(
       InstanceInvocation node, w.ValueType expectedType) {
-    w.ValueType? intrinsicResult = intrinsifier.getInstanceIntrinsic(node);
+    w.ValueType? intrinsicResult = intrinsifier.generateInstanceIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
     Procedure target = node.interfaceTarget;
     Member? singleTarget = translator.singleTarget(node);
@@ -696,19 +703,87 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       _visitArguments(node.arguments, node.interfaceTargetReference, 1);
       return _call(singleTarget.reference);
     }
-    return _virtualCall(target, node.receiver, (_) {
+    return _virtualCall(
+        target, (signature) => wrap(node.receiver, signature.inputs.first),
+        (_) {
       _visitArguments(node.arguments, node.interfaceTargetReference, 1);
     }, getter: false, setter: false);
   }
 
   @override
   w.ValueType visitEqualsCall(EqualsCall node, w.ValueType expectedType) {
-    w.ValueType? intrinsicResult = intrinsifier.getEqualsIntrinsic(node);
+    w.ValueType? intrinsicResult = intrinsifier.generateEqualsIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
-    // TODO: virtual call
-    wrap(node.left, translator.nullableObjectType);
-    wrap(node.right, translator.nullableObjectType);
-    b.ref_eq();
+    Member? singleTarget = translator.singleTarget(node);
+    if (singleTarget == translator.coreTypes.objectEquals) {
+      // Plain reference comparison
+      wrap(node.left, translator.nullableObjectType);
+      wrap(node.right, translator.nullableObjectType);
+      b.ref_eq();
+    } else {
+      // Check operands for null, then call implementation
+      w.Local leftLocal = function.addLocal(translator.nullableObjectType);
+      w.Local rightLocal = function.addLocal(translator.nullableObjectType);
+      bool leftNullable =
+          node.left.getStaticType(typeContext).isPotentiallyNullable;
+      bool rightNullable =
+          node.right.getStaticType(typeContext).isPotentiallyNullable;
+      w.Label? rightNull;
+      w.Label? leftNull;
+      w.Label? done;
+      if (leftNullable || rightNullable) {
+        done = b.block([], [w.NumType.i32]);
+        leftNull = b.block();
+        rightNull = b.block([], [translator.nullableObjectType]);
+      }
+      wrap(node.left, translator.nullableObjectType);
+      b.local_set(leftLocal);
+      wrap(node.right, translator.nullableObjectType);
+      b.local_set(rightLocal);
+
+      void left([_]) {
+        b.local_get(leftLocal);
+        if (leftNullable) {
+          b.br_on_null(leftNull!);
+        } else {
+          b.ref_as_non_null();
+        }
+      }
+
+      void right([_]) {
+        b.local_get(rightLocal);
+        if (rightNullable) {
+          b.br_on_null(rightNull!);
+        } else {
+          b.ref_as_non_null();
+        }
+      }
+
+      if (singleTarget != null) {
+        left();
+        right();
+        _call(singleTarget.reference);
+      } else {
+        _virtualCall(node.interfaceTarget, left, right,
+            getter: false, setter: false);
+      }
+      if (leftNullable || rightNullable) {
+        b.br(done!);
+        b.end(); // rightNull
+        b.drop();
+        b.end(); // leftNull
+        if (leftNullable && rightNullable) {
+          // Both sides nullable - compare references
+          b.local_get(leftLocal);
+          b.local_get(rightLocal);
+          b.ref_eq();
+        } else {
+          // Only one side nullable - not equal if one is null
+          b.i32_const(0);
+        }
+        b.end(); // done
+      }
+    }
     return w.NumType.i32;
   }
 
@@ -719,16 +794,19 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     return w.NumType.i32;
   }
 
-  w.ValueType _virtualCall(Member interfaceTarget, Expression receiver,
+  w.ValueType _virtualCall(
+      Member interfaceTarget,
+      void pushReceiver(w.FunctionType signature),
       void pushArguments(w.FunctionType signature),
-      {required bool getter, required bool setter}) {
+      {required bool getter,
+      required bool setter}) {
     int selectorId = getter
         ? translator.tableSelectorAssigner.getterSelectorId(interfaceTarget)
         : translator.tableSelectorAssigner
             .methodOrSetterSelectorId(interfaceTarget);
     SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
 
-    wrap(receiver, selector.signature.inputs.first);
+    pushReceiver(selector.signature);
 
     int? offset = selector.offset;
     if (offset == null) {
@@ -952,7 +1030,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         // Instance call of getter
         assert(singleTarget is Procedure && singleTarget.isGetter);
         w.ValueType? intrinsicResult =
-            intrinsifier.getInstanceGetterIntrinsic(node);
+            intrinsifier.generateInstanceGetterIntrinsic(node);
         if (intrinsicResult != null) return intrinsicResult;
         w.BaseFunction targetFunction =
             translator.functions.getFunction(singleTarget.reference);
@@ -960,7 +1038,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         return _call(singleTarget.reference);
       }
     } else {
-      return _virtualCall(node.interfaceTarget, node.receiver, (_) {},
+      return _virtualCall(node.interfaceTarget,
+          (signature) => wrap(node.receiver, signature.inputs.first), (_) {},
           getter: true, setter: false);
     }
   }
@@ -968,7 +1047,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitInstanceTearOff(
       InstanceTearOff node, w.ValueType expectedType) {
-    return _virtualCall(node.interfaceTarget, node.receiver, (_) {},
+    return _virtualCall(node.interfaceTarget,
+        (signature) => wrap(node.receiver, signature.inputs.first), (_) {},
         getter: true, setter: false);
   }
 
@@ -1005,7 +1085,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         _call(singleTarget.reference);
       }
     } else {
-      _virtualCall(node.interfaceTarget, node.receiver, (signature) {
+      _virtualCall(node.interfaceTarget,
+          (signature) => wrap(node.receiver, signature.inputs.first),
+          (signature) {
         w.ValueType paramType = signature.inputs.last;
         wrap(node.value, paramType);
         if (preserved) {

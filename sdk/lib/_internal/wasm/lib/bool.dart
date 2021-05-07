@@ -8,6 +8,13 @@ class _BoxedBool implements bool {
   @pragma("wasm:entry-point")
   bool value = false;
 
+  @override
+  bool operator ==(Object other) {
+    return other is bool
+        ? this == other // Intrinsic ==
+        : false;
+  }
+
   bool operator &(bool other) => this & other;
   bool operator ^(bool other) => this ^ other;
   bool operator |(bool other) => this | other;

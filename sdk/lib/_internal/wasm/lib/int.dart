@@ -63,10 +63,11 @@ class _BoxedInt implements int {
   }
 
   bool operator ==(Object other) {
-    if (other is num) {
-      throw "==";
-    }
-    return false;
+    return other is int
+        ? this == other // Intrinsic ==
+        : other is double
+            ? this.toDouble() == other // Intrinsic ==
+            : false;
   }
 
   int abs() {
