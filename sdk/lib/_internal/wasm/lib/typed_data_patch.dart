@@ -22,6 +22,14 @@ import "dart:_internal"
         Sort,
         SubListIterable,
         TakeWhileIterable,
+        WasmF32,
+        WasmF64,
+        WasmI8,
+        WasmI16,
+        WasmI32,
+        WasmI64,
+        WasmFloatArray,
+        WasmIntArray,
         WhereIterable,
         WhereTypeIterable,
         patch;
@@ -2081,7 +2089,7 @@ class Int8List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Int8List)
   @pragma("vm:prefer-inline")
-  factory Int8List(int length) native "TypedData_Int8Array_new";
+  factory Int8List(int length) => new _Int8List(length);
 
   @patch
   factory Int8List.fromList(List<int> elements) {
@@ -2094,9 +2102,11 @@ class Int8List {
 class _Int8List extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Int8List>
     implements Int8List {
-  factory _Int8List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmIntArray<WasmI8> _array;
+
+  _Int8List(int length) : _array = WasmIntArray<WasmI8>(length);
+
+  int get length => _array.length;
 
   // Method(s) implementing List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2112,7 +2122,7 @@ class _Int8List extends _TypedList
     if (index < 0 || index >= length) {
       throw new RangeError.index(index, this, "index");
     }
-    _setInt8(index, _toInt8(value));
+    _setInt8(index, value);
   }
 
   // Method(s) implementing TypedData interface.
@@ -2124,6 +2134,14 @@ class _Int8List extends _TypedList
   Int8List _createList(int length) {
     return new Int8List(length);
   }
+
+  int _getInt8(int index) {
+    return _array.readSigned(index);
+  }
+
+  void _setInt8(int index, int value) {
+    _array.write(index, value);
+  }
 }
 
 @patch
@@ -2132,7 +2150,7 @@ class Uint8List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Uint8List)
   @pragma("vm:prefer-inline")
-  factory Uint8List(int length) native "TypedData_Uint8Array_new";
+  factory Uint8List(int length) => new _Uint8List(length);
 
   @patch
   factory Uint8List.fromList(List<int> elements) {
@@ -2145,9 +2163,11 @@ class Uint8List {
 class _Uint8List extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Uint8List>
     implements Uint8List {
-  factory _Uint8List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmIntArray<WasmI8> _array;
+
+  _Uint8List(int length) : _array = WasmIntArray<WasmI8>(length);
+
+  int get length => _array.length;
 
   // Methods implementing List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2163,7 +2183,7 @@ class _Uint8List extends _TypedList
     if (index < 0 || index >= length) {
       throw new RangeError.index(index, this, "index");
     }
-    _setUint8(index, _toUint8(value));
+    _setUint8(index, value);
   }
 
   // Methods implementing TypedData interface.
@@ -2175,6 +2195,14 @@ class _Uint8List extends _TypedList
   Uint8List _createList(int length) {
     return new Uint8List(length);
   }
+
+  int _getUint8(int index) {
+    return _array.readUnsigned(index);
+  }
+
+  void _setUint8(int index, int value) {
+    _array.write(index, value);
+  }
 }
 
 @patch
@@ -2183,7 +2211,7 @@ class Uint8ClampedList {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Uint8ClampedList)
   @pragma("vm:prefer-inline")
-  factory Uint8ClampedList(int length) native "TypedData_Uint8ClampedArray_new";
+  factory Uint8ClampedList(int length) => new _Uint8ClampedList(length);
 
   @patch
   factory Uint8ClampedList.fromList(List<int> elements) {
@@ -2196,9 +2224,11 @@ class Uint8ClampedList {
 class _Uint8ClampedList extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Uint8ClampedList>
     implements Uint8ClampedList {
-  factory _Uint8ClampedList._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmIntArray<WasmI8> _array;
+
+  _Uint8ClampedList(int length) : _array = WasmIntArray<WasmI8>(length);
+
+  int get length => _array.length;
 
   // Methods implementing List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2226,6 +2256,14 @@ class _Uint8ClampedList extends _TypedList
   Uint8ClampedList _createList(int length) {
     return new Uint8ClampedList(length);
   }
+
+  int _getUint8(int index) {
+    return _array.readUnsigned(index);
+  }
+
+  void _setUint8(int index, int value) {
+    _array.write(index, value);
+  }
 }
 
 @patch
@@ -2234,7 +2272,7 @@ class Int16List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Int16List)
   @pragma("vm:prefer-inline")
-  factory Int16List(int length) native "TypedData_Int16Array_new";
+  factory Int16List(int length) => new _Int16List(length);
 
   @patch
   factory Int16List.fromList(List<int> elements) {
@@ -2247,9 +2285,11 @@ class Int16List {
 class _Int16List extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Int16List>
     implements Int16List {
-  factory _Int16List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmIntArray<WasmI16> _array;
+
+  _Int16List(int length) : _array = WasmIntArray<WasmI16>(length);
+
+  int get length => _array.length;
 
   // Method(s) implementing List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2291,11 +2331,11 @@ class _Int16List extends _TypedList
   }
 
   int _getIndexedInt16(int index) {
-    return _getInt16(index * Int16List.bytesPerElement);
+    return _array.readSigned(index);
   }
 
   void _setIndexedInt16(int index, int value) {
-    _setInt16(index * Int16List.bytesPerElement, value);
+    _array.write(index, value);
   }
 }
 
@@ -2305,7 +2345,7 @@ class Uint16List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Uint16List)
   @pragma("vm:prefer-inline")
-  factory Uint16List(int length) native "TypedData_Uint16Array_new";
+  factory Uint16List(int length) => new _Uint16List(length);
 
   @patch
   factory Uint16List.fromList(List<int> elements) {
@@ -2318,9 +2358,11 @@ class Uint16List {
 class _Uint16List extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Uint16List>
     implements Uint16List {
-  factory _Uint16List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmIntArray<WasmI16> _array;
+
+  _Uint16List(int length) : _array = WasmIntArray<WasmI16>(length);
+
+  int get length => _array.length;
 
   // Method(s) implementing the List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2362,11 +2404,11 @@ class _Uint16List extends _TypedList
   }
 
   int _getIndexedUint16(int index) {
-    return _getUint16(index * Uint16List.bytesPerElement);
+    return _array.readUnsigned(index);
   }
 
   void _setIndexedUint16(int index, int value) {
-    _setUint16(index * Uint16List.bytesPerElement, value);
+    _array.write(index, value);
   }
 }
 
@@ -2376,7 +2418,7 @@ class Int32List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Int32List)
   @pragma("vm:prefer-inline")
-  factory Int32List(int length) native "TypedData_Int32Array_new";
+  factory Int32List(int length) => new _Int32List(length);
 
   @patch
   factory Int32List.fromList(List<int> elements) {
@@ -2389,9 +2431,11 @@ class Int32List {
 class _Int32List extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Int32List>
     implements Int32List {
-  factory _Int32List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmIntArray<WasmI32> _array;
+
+  _Int32List(int length) : _array = WasmIntArray<WasmI32>(length);
+
+  int get length => _array.length;
 
   // Method(s) implementing the List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2421,11 +2465,11 @@ class _Int32List extends _TypedList
   }
 
   int _getIndexedInt32(int index) {
-    return _getInt32(index * Int32List.bytesPerElement);
+    return _array.readSigned(index);
   }
 
   void _setIndexedInt32(int index, int value) {
-    _setInt32(index * Int32List.bytesPerElement, value);
+    _array.write(index, value);
   }
 }
 
@@ -2435,7 +2479,7 @@ class Uint32List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Uint32List)
   @pragma("vm:prefer-inline")
-  factory Uint32List(int length) native "TypedData_Uint32Array_new";
+  factory Uint32List(int length) => _Uint32List(length);
 
   @patch
   factory Uint32List.fromList(List<int> elements) {
@@ -2448,9 +2492,11 @@ class Uint32List {
 class _Uint32List extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Uint32List>
     implements Uint32List {
-  factory _Uint32List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmIntArray<WasmI32> _array;
+
+  _Uint32List(int length) : _array = WasmIntArray<WasmI32>(length);
+
+  int get length => _array.length;
 
   // Method(s) implementing the List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2480,11 +2526,11 @@ class _Uint32List extends _TypedList
   }
 
   int _getIndexedUint32(int index) {
-    return _getUint32(index * Uint32List.bytesPerElement);
+    return _array.readUnsigned(index);
   }
 
   void _setIndexedUint32(int index, int value) {
-    _setUint32(index * Uint32List.bytesPerElement, value);
+    _array.write(index, value);
   }
 }
 
@@ -2494,7 +2540,7 @@ class Int64List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Int64List)
   @pragma("vm:prefer-inline")
-  factory Int64List(int length) native "TypedData_Int64Array_new";
+  factory Int64List(int length) => new _Int64List(length);
 
   @patch
   factory Int64List.fromList(List<int> elements) {
@@ -2507,9 +2553,11 @@ class Int64List {
 class _Int64List extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Int64List>
     implements Int64List {
-  factory _Int64List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmIntArray<WasmI64> _array;
+
+  _Int64List(int length) : _array = WasmIntArray<WasmI64>(length);
+
+  int get length => _array.length;
 
   // Method(s) implementing the List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2539,11 +2587,11 @@ class _Int64List extends _TypedList
   }
 
   int _getIndexedInt64(int index) {
-    return _getInt64(index * Int64List.bytesPerElement);
+    return _array.readSigned(index);
   }
 
   void _setIndexedInt64(int index, int value) {
-    _setInt64(index * Int64List.bytesPerElement, value);
+    _array.write(index, value);
   }
 }
 
@@ -2553,7 +2601,7 @@ class Uint64List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Uint64List)
   @pragma("vm:prefer-inline")
-  factory Uint64List(int length) native "TypedData_Uint64Array_new";
+  factory Uint64List(int length) => new _Uint64List(length);
 
   @patch
   factory Uint64List.fromList(List<int> elements) {
@@ -2566,9 +2614,11 @@ class Uint64List {
 class _Uint64List extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Uint64List>
     implements Uint64List {
-  factory _Uint64List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmIntArray<WasmI64> _array;
+
+  _Uint64List(int length) : _array = WasmIntArray<WasmI64>(length);
+
+  int get length => _array.length;
 
   // Method(s) implementing the List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2598,11 +2648,11 @@ class _Uint64List extends _TypedList
   }
 
   int _getIndexedUint64(int index) {
-    return _getUint64(index * Uint64List.bytesPerElement);
+    return _array.readUnsigned(index);
   }
 
   void _setIndexedUint64(int index, int value) {
-    _setUint64(index * Uint64List.bytesPerElement, value);
+    _array.write(index, value);
   }
 }
 
@@ -2612,7 +2662,7 @@ class Float32List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Float32List)
   @pragma("vm:prefer-inline")
-  factory Float32List(int length) native "TypedData_Float32Array_new";
+  factory Float32List(int length) => new _Float32List(length);
 
   @patch
   factory Float32List.fromList(List<double> elements) {
@@ -2625,9 +2675,11 @@ class Float32List {
 class _Float32List extends _TypedList
     with _DoubleListMixin, _TypedDoubleListMixin<Float32List>
     implements Float32List {
-  factory _Float32List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmFloatArray<WasmF32> _array;
+
+  _Float32List(int length) : _array = WasmFloatArray<WasmF32>(length);
+
+  int get length => _array.length;
 
   // Method(s) implementing the List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2657,11 +2709,11 @@ class _Float32List extends _TypedList
   }
 
   double _getIndexedFloat32(int index) {
-    return _getFloat32(index * Float32List.bytesPerElement);
+    return _array.read(index);
   }
 
   void _setIndexedFloat32(int index, double value) {
-    _setFloat32(index * Float32List.bytesPerElement, value);
+    _array.write(index, value);
   }
 }
 
@@ -2671,7 +2723,7 @@ class Float64List {
   @pragma("vm:recognized", "other")
   @pragma("vm:exact-result-type", _Float64List)
   @pragma("vm:prefer-inline")
-  factory Float64List(int length) native "TypedData_Float64Array_new";
+  factory Float64List(int length) => new _Float64List(length);
 
   @patch
   factory Float64List.fromList(List<double> elements) {
@@ -2684,9 +2736,11 @@ class Float64List {
 class _Float64List extends _TypedList
     with _DoubleListMixin, _TypedDoubleListMixin<Float64List>
     implements Float64List {
-  factory _Float64List._uninstantiable() {
-    throw "Unreachable";
-  }
+  WasmFloatArray<WasmF64> _array;
+
+  _Float64List(int length) : _array = WasmFloatArray<WasmF64>(length);
+
+  int get length => _array.length;
 
   // Method(s) implementing the List interface.
   @pragma("vm:recognized", "graph-intrinsic")
@@ -2716,11 +2770,11 @@ class _Float64List extends _TypedList
   }
 
   double _getIndexedFloat64(int index) {
-    return _getFloat64(index * Float64List.bytesPerElement);
+    return _array.read(index);
   }
 
   void _setIndexedFloat64(int index, double value) {
-    _setFloat64(index * Float64List.bytesPerElement, value);
+    _array.write(index, value);
   }
 }
 
