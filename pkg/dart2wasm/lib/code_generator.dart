@@ -1251,8 +1251,14 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   w.ValueType visitIsExpression(IsExpression node, w.ValueType expectedType) {
+    wrap(node.operand, translator.nullableObjectType);
     DartType type = node.type;
-    if (type is! InterfaceType) throw "Unsupported type in 'is' check: $type";
+    if (type is! InterfaceType) {
+      // TODO: Check
+      b.drop();
+      b.i32_const(1);
+      return w.NumType.i32;
+    }
     Class? singular = null;
     for (Class subclass in translator.subtypes.getSubtypesOf(type.classNode)) {
       if (!subclass.isAbstract) {
@@ -1262,7 +1268,6 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         singular = subclass;
       }
     }
-    wrap(node.operand, translator.nullableObjectType);
     if (singular == null) {
       b.drop();
       b.i32_const(0);

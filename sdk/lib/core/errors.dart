@@ -407,10 +407,7 @@ class IndexError extends ArgumentError implements RangeError {
   IndexError(int invalidValue, dynamic indexable,
       [String? name, String? message, int? length])
       : this.indexable = indexable,
-        this.length = length ??
-            (indexable is String
-                ? indexable.length
-                : (indexable as List<dynamic>).length),
+        this.length = length ?? 0,
         super.value(invalidValue, name, message ?? "Index out of range");
 
   // Getters inherited from RangeError.
