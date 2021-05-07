@@ -1321,23 +1321,37 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.i32_const(1);
       return w.NumType.i32;
     }
-    Class? singular = null;
-    for (Class subclass in translator.subtypes.getSubtypesOf(type.classNode)) {
-      if (!subclass.isAbstract) {
-        if (singular != null) {
-          throw "Only supports 'is' check with singular concrete subclass";
-        }
-        singular = subclass;
-      }
+    if (type.typeArguments.any((t) => t is! DynamicType)) {
+      throw "Type test with type arguments not supported";
     }
-    if (singular == null) {
+    List<Class> concrete = translator.subtypes
+        .getSubtypesOf(type.classNode)
+        .where((c) => !c.isAbstract)
+        .toList();
+    if (concrete.isEmpty) {
       b.drop();
       b.i32_const(0);
-    } else {
-      ClassInfo info = translator.classInfo[singular]!;
+    } else if (concrete.length == 1) {
+      ClassInfo info = translator.classInfo[concrete.single]!;
       b.struct_get(object.struct, 0);
       b.i32_const(info.classId);
       b.i32_eq();
+    } else {
+      w.Local idLocal = function.addLocal(w.NumType.i32);
+      b.struct_get(object.struct, 0);
+      b.local_set(idLocal);
+      w.Label done = b.block([], [w.NumType.i32]);
+      b.i32_const(1);
+      for (Class cls in concrete) {
+        ClassInfo info = translator.classInfo[cls]!;
+        b.i32_const(info.classId);
+        b.local_get(idLocal);
+        b.i32_eq();
+        b.br_if(done);
+      }
+      b.drop();
+      b.i32_const(0);
+      b.end();
     }
     return w.NumType.i32;
   }
