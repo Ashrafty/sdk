@@ -13,15 +13,11 @@ abstract class Label {
   int? index;
   late final int depth;
   late final int baseStackHeight;
-  bool containsJump = false;
+  bool reachable = true;
 
   Label._(this.inputs, this.outputs);
 
-  void markJump() => containsJump = true;
-
   List<ValueType> get targetTypes;
-
-  bool get jumpToEnd;
 
   bool get hasIndex => index != null;
 
@@ -37,8 +33,6 @@ class Expression extends Label {
   }
 
   List<ValueType> get targetTypes => outputs;
-
-  bool get jumpToEnd => false;
 }
 
 class Block extends Label {
@@ -46,8 +40,6 @@ class Block extends Label {
       : super._(inputs, outputs);
 
   List<ValueType> get targetTypes => outputs;
-
-  bool get jumpToEnd => containsJump;
 }
 
 class Loop extends Label {
@@ -55,8 +47,6 @@ class Loop extends Label {
       : super._(inputs, outputs);
 
   List<ValueType> get targetTypes => inputs;
-
-  bool get jumpToEnd => false;
 }
 
 class If extends Label {
@@ -66,8 +56,6 @@ class If extends Label {
       : super._(inputs, outputs);
 
   List<ValueType> get targetTypes => outputs;
-
-  bool get jumpToEnd => containsJump || !hasElse;
 }
 
 class Instructions with SerializerMixin {
@@ -236,6 +224,7 @@ class Instructions with SerializerMixin {
     label.index = ++labelIndex;
     label.depth = labelStack.length;
     label.baseStackHeight = _stackTypes.length - label.inputs.length;
+    label.reachable = reachable;
     labelStack.add(label);
     writeByte(encoding);
     if (label.inputs.isEmpty && label.outputs.isEmpty) {
@@ -274,7 +263,6 @@ class Instructions with SerializerMixin {
     assert(_verifyEndOfBlock(label.inputs,
         trace: const ['else'], reachableAfter: true, reindent: true));
     label.hasElse = true;
-    if (reachable) label.markJump();
     reachable = true;
     writeByte(0x05);
   }
@@ -282,9 +270,9 @@ class Instructions with SerializerMixin {
   void end() {
     assert(_verifyEndOfBlock(_topOfLabelStack.outputs,
         trace: const ['end'],
-        reachableAfter: reachable || _topOfLabelStack.jumpToEnd,
+        reachableAfter: _topOfLabelStack.reachable,
         reindent: false));
-    reachable |= _topOfLabelStack.jumpToEnd;
+    reachable = _topOfLabelStack.reachable;
     labelStack.removeLast();
     writeByte(0x0B);
   }
@@ -303,7 +291,6 @@ class Instructions with SerializerMixin {
     assert(_verifyTypes(const [], const [],
         trace: ['br', label], reachableAfter: false));
     assert(_verifyBranchTypes(label));
-    label.markJump();
     reachable = false;
     writeByte(0x0C);
     _writeLabel(label);
@@ -313,7 +300,6 @@ class Instructions with SerializerMixin {
     assert(
         _verifyTypes(const [NumType.i32], const [], trace: ['br_if', label]));
     assert(_verifyBranchTypes(label));
-    label.markJump();
     writeByte(0x0D);
     _writeLabel(label);
   }
@@ -323,10 +309,8 @@ class Instructions with SerializerMixin {
         trace: ['br_table', ...labels, defaultLabel], reachableAfter: false));
     for (var label in labels) {
       assert(_verifyBranchTypes(label));
-      label.markJump();
     }
     assert(_verifyBranchTypes(defaultLabel));
-    defaultLabel.markJump();
     reachable = false;
     writeByte(0x0E);
     writeUnsigned(labels.length);
@@ -481,7 +465,6 @@ class Instructions with SerializerMixin {
         const [RefType.any()], [_topOfStack.withNullability(false)],
         trace: ['br_on_null', label]));
     assert(_verifyBranchTypes(label, 1));
-    label.markJump();
     writeByte(0xD4);
     _writeLabel(label);
   }
@@ -704,7 +687,6 @@ class Instructions with SerializerMixin {
     }, trace: ['br_on_cast', label]));
     assert(_verifyBranchTypes(
         label, 1, [RefType.def(targetType, nullable: false)]));
-    label.markJump();
     writeBytes(const [0xFB, 0x42]);
     _writeLabel(label);
   }
@@ -752,7 +734,6 @@ class Instructions with SerializerMixin {
     assert(_verifyTypes(const [RefType.any()], [_topOfStack],
         trace: ['br_on_func', label]));
     assert(_verifyBranchTypes(label, 1, const [RefType.func(nullable: false)]));
-    label.markJump();
     writeBytes(const [0xFB, 0x60]);
     _writeLabel(label);
   }
@@ -761,7 +742,6 @@ class Instructions with SerializerMixin {
     assert(_verifyTypes(const [RefType.any()], [_topOfStack],
         trace: ['br_on_data', label]));
     assert(_verifyBranchTypes(label, 1, const [RefType.data(nullable: false)]));
-    label.markJump();
     writeBytes(const [0xFB, 0x61]);
     _writeLabel(label);
   }
@@ -770,7 +750,6 @@ class Instructions with SerializerMixin {
     assert(_verifyTypes(const [RefType.any()], [_topOfStack],
         trace: ['br_on_i31', label]));
     assert(_verifyBranchTypes(label, 1, const [RefType.i31(nullable: false)]));
-    label.markJump();
     writeBytes(const [0xFB, 0x62]);
     _writeLabel(label);
   }
