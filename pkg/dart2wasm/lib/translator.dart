@@ -273,6 +273,9 @@ class Translator {
     if (type is DynamicType) {
       return nullableObjectType;
     }
+    if (type is NullType) {
+      return nullableObjectType;
+    }
     if (type is VoidType) {
       return voidMarker;
     }
