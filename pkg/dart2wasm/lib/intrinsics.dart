@@ -131,6 +131,20 @@ class Intrinsifier {
       b.i64_extend_i32_u();
       return w.NumType.i64;
     }
+    if (node.interfaceTarget.enclosingClass == translator.coreTypes.intClass &&
+        name == 'bitLength') {
+      w.Local temp = codeGen.function.addLocal(w.NumType.i64);
+      b.i64_const(64);
+      codeGen.wrap(node.receiver, w.NumType.i64);
+      b.local_tee(temp);
+      b.local_get(temp);
+      b.i64_const(63);
+      b.i64_shr_s();
+      b.i64_xor();
+      b.i64_clz();
+      b.i64_sub();
+      return w.NumType.i64;
+    }
   }
 
   w.ValueType? getInstanceIntrinsic(InstanceInvocation node) {
@@ -186,7 +200,7 @@ class Intrinsifier {
           codeGen.wrap(array, w.RefType.def(arrayType, nullable: true));
           codeGen.wrap(index, w.NumType.i64);
           b.i32_wrap_i64();
-          codeGen.wrap(value, translator.translateType(elementType));
+          codeGen.wrap(value, typeOfExp(value));
           if (outerExtend) {
             if (wasmType == w.NumType.f32) {
               b.f32_demote_f64();

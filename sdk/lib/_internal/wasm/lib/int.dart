@@ -449,7 +449,7 @@ class _BoxedInt implements int {
   int get hashCode => this;
   int get _identityHashCode => this;
   int operator ~() => throw "~'";
-  int get bitLength => throw "bitLength";
+  int get bitLength native;
 
   /**
    * The digits of '00', '01', ... '99' as a single array.
