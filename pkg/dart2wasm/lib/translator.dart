@@ -58,6 +58,7 @@ class Translator {
   late final Class boxedDoubleClass;
   late final Class functionClass;
   late final Class fixedLengthListClass;
+  late final Class growableListClass;
   late final Map<Class, w.StorageType> builtinTypes;
   late final Map<w.ValueType, Class> boxedClasses;
 
@@ -112,6 +113,7 @@ class Translator {
     boxedDoubleClass = lookupCore("_BoxedDouble");
     functionClass = lookupCore("_Function");
     fixedLengthListClass = lookupCore("_List");
+    growableListClass = lookupCore("_GrowableList");
     builtinTypes = {
       coreTypes.boolClass: w.NumType.i32,
       coreTypes.intClass: w.NumType.i64,

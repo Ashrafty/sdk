@@ -78,10 +78,6 @@ class WasmTarget extends Target {
         this, coreTypes, hierarchy, libraries, referenceFromIndex);
     logger?.call("Transformed mixin applications");
 
-    lowering.transformLibraries(
-        libraries, coreTypes, hierarchy, flags.enableNullSafety);
-    logger?.call("Lowering transformations performed");
-
     wasmTrans.transformLibraries(libraries, coreTypes, hierarchy);
   }
 
@@ -92,10 +88,6 @@ class WasmTarget extends Target {
       Procedure procedure,
       Map<String, String> environmentDefines,
       {void logger(String msg)?}) {
-    lowering.transformProcedure(
-        procedure, coreTypes, hierarchy, flags.enableNullSafety);
-    logger?.call("Lowering transformations performed");
-
     wasmTrans.transformProcedure(procedure, coreTypes, hierarchy);
   }
 

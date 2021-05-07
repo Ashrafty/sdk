@@ -1250,6 +1250,40 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   @override
+  w.ValueType visitListLiteral(ListLiteral node, w.ValueType expectedType) {
+    ClassInfo info = translator.classInfo[translator.growableListClass]!;
+    w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
+    w.ArrayType arrayType =
+        (refType.heapType as w.DefHeapType).def as w.ArrayType;
+    w.ValueType elementType = arrayType.elementType.type.unpacked;
+    int length = node.expressions.length;
+
+    b.i32_const(info.classId);
+    b.i64_const(length);
+    b.i32_const(length);
+    b.rtt_canon(arrayType);
+    b.array_new_default_with_rtt(arrayType);
+    if (length > 0) {
+      w.Local arrayLocal = function.addLocal(typeForLocal(refType));
+      b.local_set(arrayLocal);
+      for (int i = 0; i < length; i++) {
+        b.local_get(arrayLocal);
+        b.i32_const(i);
+        wrap(node.expressions[i], elementType);
+        b.array_set(arrayType);
+      }
+      b.local_get(arrayLocal);
+      if (arrayLocal.type.nullable) {
+        b.ref_as_non_null();
+      }
+    }
+    b.global_get(info.rtt);
+    b.struct_new_with_rtt(info.struct);
+
+    return w.RefType.def(info.struct, nullable: false);
+  }
+
+  @override
   w.ValueType visitIsExpression(IsExpression node, w.ValueType expectedType) {
     wrap(node.operand, translator.nullableObjectType);
     DartType type = node.type;

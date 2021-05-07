@@ -6,7 +6,9 @@
 
 @pragma("wasm:entry-point")
 abstract class _ListBase<E> extends ListBase<E> {
+  @pragma("wasm:entry-point")
   int _length;
+  @pragma("wasm:entry-point")
   WasmObjectArray<Object?> _data;
 
   _ListBase(int length, int capacity)
