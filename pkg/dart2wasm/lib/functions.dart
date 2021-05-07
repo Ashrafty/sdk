@@ -92,13 +92,16 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
   }
 
   w.FunctionType visitConstructor(Constructor node, Reference target) {
-    return _makeFunctionType(target, VoidType(),
-        InterfaceType(node.enclosingClass, Nullability.nonNullable),
+    return _makeFunctionType(
+        target,
+        VoidType(),
+        w.RefType.def(translator.classInfo[node.enclosingClass]!.struct,
+            nullable: false),
         getter: false);
   }
 
   w.FunctionType _makeFunctionType(
-      Reference target, DartType returnType, DartType? receiverType,
+      Reference target, DartType returnType, w.ValueType? receiverType,
       {required bool getter}) {
     Member member = target.asMember;
     Iterable<DartType> params;
@@ -120,7 +123,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
 
     List<w.ValueType> inputs = [];
     if (receiverType != null) {
-      inputs.add(translator.translateType(receiverType));
+      inputs.add(receiverType);
     }
     inputs.addAll(params.map((t) => translator.translateType(t)));
 

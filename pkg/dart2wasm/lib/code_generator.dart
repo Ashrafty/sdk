@@ -641,8 +641,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType visitConstructorInvocation(
       ConstructorInvocation node, w.ValueType expectedType) {
     ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
-    w.Local temp = function.addLocal(
-        typeForLocal(w.RefType.def(info.repr.struct, nullable: false)));
+    w.Local temp = function
+        .addLocal(typeForLocal(w.RefType.def(info.struct, nullable: false)));
     b.global_get(info.rtt);
     b.struct_new_default_with_rtt(info.struct);
     b.local_tee(temp);
