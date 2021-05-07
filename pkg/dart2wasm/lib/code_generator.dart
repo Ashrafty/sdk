@@ -1284,6 +1284,34 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   @override
+  w.ValueType visitMapLiteral(MapLiteral node, w.ValueType expectedType) {
+    w.BaseFunction mapFactory =
+        translator.functions.getFunction(translator.mapFactory.reference);
+    w.ValueType factoryReturnType = mapFactory.type.outputs.single;
+    b.call(mapFactory);
+    if (node.entries.isEmpty) {
+      return factoryReturnType;
+    }
+    w.BaseFunction mapPut =
+        translator.functions.getFunction(translator.mapPut.reference);
+    w.ValueType putReceiverType = mapPut.type.inputs[0];
+    w.ValueType putKeyType = mapPut.type.inputs[1];
+    w.ValueType putValueType = mapPut.type.inputs[2];
+    w.Local mapLocal = function.addLocal(typeForLocal(putReceiverType));
+    translator.convertType(function, factoryReturnType, mapLocal.type);
+    b.local_set(mapLocal);
+    for (MapLiteralEntry entry in node.entries) {
+      b.local_get(mapLocal);
+      translator.convertType(function, mapLocal.type, putReceiverType);
+      wrap(entry.key, putKeyType);
+      wrap(entry.value, putValueType);
+      b.call(mapPut);
+    }
+    b.local_get(mapLocal);
+    return mapLocal.type;
+  }
+
+  @override
   w.ValueType visitIsExpression(IsExpression node, w.ValueType expectedType) {
     wrap(node.operand, translator.nullableObjectType);
     DartType type = node.type;

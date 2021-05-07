@@ -44,51 +44,9 @@ abstract class _HashFieldBase {
   _HashFieldBase(int dataSize);
 }
 
-// Base class for VM-internal classes; keep in sync with _HashFieldBase.
-abstract class _HashVMBase {
-  @pragma("vm:recognized", "other")
-  @pragma("vm:exact-result-type", "dart:typed_data#_Uint32List")
-  @pragma("vm:prefer-inline")
-  Uint32List get _index native "LinkedHashMap_getIndex";
-  @pragma("vm:recognized", "other")
-  @pragma("vm:prefer-inline")
-  void set _index(Uint32List value) native "LinkedHashMap_setIndex";
-
-  @pragma("vm:recognized", "other")
-  @pragma("vm:prefer-inline")
-  int get _hashMask native "LinkedHashMap_getHashMask";
-  @pragma("vm:recognized", "other")
-  @pragma("vm:prefer-inline")
-  void set _hashMask(int value) native "LinkedHashMap_setHashMask";
-
-  @pragma("vm:recognized", "other")
-  @pragma("vm:exact-result-type", "dart:core#_List")
-  @pragma("vm:prefer-inline")
-  List get _data native "LinkedHashMap_getData";
-  @pragma("vm:recognized", "other")
-  @pragma("vm:prefer-inline")
-  void set _data(List value) native "LinkedHashMap_setData";
-
-  @pragma("vm:recognized", "other")
-  @pragma("vm:prefer-inline")
-  int get _usedData native "LinkedHashMap_getUsedData";
-  @pragma("vm:recognized", "other")
-  @pragma("vm:prefer-inline")
-  void set _usedData(int value) native "LinkedHashMap_setUsedData";
-
-  @pragma("vm:recognized", "other")
-  @pragma("vm:prefer-inline")
-  int get _deletedKeys native "LinkedHashMap_getDeletedKeys";
-  @pragma("vm:recognized", "other")
-  @pragma("vm:prefer-inline")
-  void set _deletedKeys(int value) native "LinkedHashMap_setDeletedKeys";
-}
-
-// This mixin can be applied to _HashFieldBase or _HashVMBase (for
-// normal and VM-internalized classes, respectiveley), which provide the
+// This mixin can be applied to _HashFieldBase, which provide the
 // actual fields/accessors that this mixin assumes.
-// TODO(koda): Consider moving field comments to _HashFieldBase.
-abstract class _HashBase implements _HashVMBase {
+mixin _HashBase on _HashFieldBase {
   // The number of bits used for each component is determined by table size.
   // The length of _index is twice the number of entries in _data, and both
   // are doubled when _data is full. Thus, _index will have a max load factor
@@ -142,12 +100,12 @@ abstract class _HashBase implements _HashVMBase {
   int get length;
 }
 
-class _OperatorEqualsAndHashCode {
+mixin _OperatorEqualsAndHashCode {
   int _hashCode(e) => e.hashCode;
   bool _equals(e1, e2) => e1 == e2;
 }
 
-class _IdenticalAndIdentityHashCode {
+mixin _IdenticalAndIdentityHashCode {
   int _hashCode(e) => identityHashCode(e);
   bool _equals(e1, e2) => identical(e1, e2);
 }
@@ -158,27 +116,10 @@ final _initialIndex = new Uint32List(1);
 // in maps and sets to be monomorphic.
 final _initialData = new List.filled(0, null);
 
-// VM-internalized implementation of a default-constructed LinkedHashMap.
-@pragma("vm:entry-point")
-class _InternalLinkedHashMap<K, V> extends _HashVMBase
-    with
-        MapMixin<K, V>,
-        _LinkedHashMapMixin<K, V>,
-        _HashBase,
-        _OperatorEqualsAndHashCode
-    implements LinkedHashMap<K, V> {
-  _InternalLinkedHashMap() {
-    _index = _initialIndex;
-    _hashMask = 0;
-    _data = _initialData;
-    _usedData = 0;
-    _deletedKeys = 0;
-  }
-}
-
-abstract class _LinkedHashMapMixin<K, V> implements _HashBase {
-  int _hashCode(e);
-  bool _equals(e1, e2);
+@pragma("wasm:entry-point")
+mixin _LinkedHashMapMixin<K, V> implements _HashBase {
+  int _hashCode(K e);
+  bool _equals(K e1, K e2);
   int get _checkSum;
   bool _isModifiedSince(List oldData, int oldCheckSum);
 
@@ -281,6 +222,7 @@ abstract class _LinkedHashMapMixin<K, V> implements _HashBase {
     return firstDeleted >= 0 ? -firstDeleted : -i;
   }
 
+  @pragma("wasm:entry-point")
   void operator []=(K key, V value) {
     final int size = _index.length;
     final int fullHash = _hashCode(key);
@@ -319,7 +261,7 @@ abstract class _LinkedHashMapMixin<K, V> implements _HashBase {
     final int size = _index.length;
     final int sizeMask = size - 1;
     final int maxEntries = size >> 1;
-    final int fullHash = _hashCode(key);
+    final int fullHash = _hashCode(key as K);
     final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
     int i = _HashBase._firstProbe(fullHash, sizeMask);
     int pair = _index[i];
@@ -328,7 +270,7 @@ abstract class _LinkedHashMapMixin<K, V> implements _HashBase {
         final int entry = hashPattern ^ pair;
         if (entry < maxEntries) {
           final int d = entry << 1;
-          if (_equals(key, _data[d])) {
+          if (_equals(key as K, _data[d])) {
             _index[i] = _HashBase._DELETED_PAIR;
             _HashBase._setDeletedAt(_data, d);
             V value = _data[d + 1];
@@ -349,7 +291,7 @@ abstract class _LinkedHashMapMixin<K, V> implements _HashBase {
     final int size = _index.length;
     final int sizeMask = size - 1;
     final int maxEntries = size >> 1;
-    final int fullHash = _hashCode(key);
+    final int fullHash = _hashCode(key as K);
     final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
     int i = _HashBase._firstProbe(fullHash, sizeMask);
     int pair = _index[i];
@@ -358,7 +300,7 @@ abstract class _LinkedHashMapMixin<K, V> implements _HashBase {
         final int entry = hashPattern ^ pair;
         if (entry < maxEntries) {
           final int d = entry << 1;
-          if (_equals(key, _data[d])) {
+          if (_equals(key as K, _data[d])) {
             return _data[d + 1];
           }
         }
@@ -411,16 +353,17 @@ class _CompactLinkedIdentityHashMap<K, V> extends _HashFieldBase
   _CompactLinkedIdentityHashMap() : super(_HashBase._INITIAL_INDEX_SIZE);
 }
 
+@pragma("wasm:entry-point")
 class _CompactLinkedCustomHashMap<K, V> extends _HashFieldBase
     with MapMixin<K, V>, _LinkedHashMapMixin<K, V>, _HashBase
     implements LinkedHashMap<K, V> {
-  final _equality;
-  final _hasher;
-  final _validKey;
+  final bool Function(K, K) _equality;
+  final int Function(K) _hasher;
+  final bool Function(Object?) _validKey;
 
   // TODO(koda): Ask gbracha why I cannot have fields _equals/_hashCode.
-  int _hashCode(e) => _hasher(e);
-  bool _equals(e1, e2) => _equality(e1, e2);
+  int _hashCode(K e) => _hasher(e);
+  bool _equals(K e1, K e2) => _equality(e1, e2);
 
   bool containsKey(Object? o) => _validKey(o) ? super.containsKey(o) : false;
   V? operator [](Object? o) => _validKey(o) ? super[o] : null;

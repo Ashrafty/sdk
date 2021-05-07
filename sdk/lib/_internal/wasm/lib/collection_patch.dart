@@ -850,10 +850,9 @@ class _HashSetIterator<E> implements Iterator<E> {
 
 /**
  * A hash-based map that iterates keys and values in key insertion order.
- * This is never actually instantiated any more - the constructor always
- * returns an instance of _CompactLinkedHashMap or _InternalLinkedHashMap,
- * which despite the names do not use links (but are insertion-ordered as if
- * they did).
+ * The constructor always returns an instance of _CompactLinkedCustomHashMap,
+ * which despite the name does not use links (but is insertion-ordered as if
+ * it did).
  */
 @patch
 class LinkedHashMap<K, V> {
@@ -862,23 +861,8 @@ class LinkedHashMap<K, V> {
       {bool equals(K key1, K key2)?,
       int hashCode(K key)?,
       bool isValidKey(potentialKey)?}) {
-    if (isValidKey == null) {
-      if (hashCode == null) {
-        if (equals == null) {
-          return new _InternalLinkedHashMap<K, V>();
-        }
-        hashCode = _defaultHashCode;
-      } else {
-        if (identical(identityHashCode, hashCode) &&
-            identical(identical, equals)) {
-          return new _CompactLinkedIdentityHashMap<K, V>();
-        }
-        equals ??= _defaultEquals;
-      }
-    } else {
-      hashCode ??= _defaultHashCode;
-      equals ??= _defaultEquals;
-    }
+    hashCode ??= _defaultHashCode;
+    equals ??= _defaultEquals;
     return new _CompactLinkedCustomHashMap<K, V>(equals, hashCode, isValidKey);
   }
 

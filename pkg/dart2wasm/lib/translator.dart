@@ -59,6 +59,8 @@ class Translator {
   late final Class functionClass;
   late final Class fixedLengthListClass;
   late final Class growableListClass;
+  late final Procedure mapFactory;
+  late final Procedure mapPut;
   late final Map<Class, w.StorageType> builtinTypes;
   late final Map<w.ValueType, Class> boxedClasses;
 
@@ -114,6 +116,16 @@ class Translator {
     functionClass = lookupCore("_Function");
     fixedLengthListClass = lookupCore("_List");
     growableListClass = lookupCore("_GrowableList");
+    mapFactory = lookupCore("Map").procedures.firstWhere(
+        (p) => p.kind == ProcedureKind.Factory && p.name.text == "");
+    mapPut = component.libraries
+        .firstWhere((l) => l.name == "dart.collection")
+        .classes
+        .firstWhere((c) => c.name == "_CompactLinkedCustomHashMap")
+        .superclass! // _HashBase
+        .superclass! // _LinkedHashMapMixin<K, V>
+        .procedures
+        .firstWhere((p) => p.name.text == "[]=");
     builtinTypes = {
       coreTypes.boolClass: w.NumType.i32,
       coreTypes.intClass: w.NumType.i64,
