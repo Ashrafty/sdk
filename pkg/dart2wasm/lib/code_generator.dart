@@ -35,6 +35,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.Local? thisLocal;
   w.Local? preciseThisLocal;
   List<Statement> finalizers = [];
+  Map<LabeledStatement, w.Label> labels = {};
 
   late w.Instructions b;
 
@@ -398,6 +399,20 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   @override
+  void visitLabeledStatement(LabeledStatement node) {
+    w.Label label = b.block();
+    labels[node] = label;
+    node.body.accept(this);
+    labels.remove(node);
+    b.end();
+  }
+
+  @override
+  void visitBreakStatement(BreakStatement node) {
+    b.br(labels[node.target]!);
+  }
+
+  @override
   void visitVariableDeclaration(VariableDeclaration node) {
     w.ValueType type = translateType(node.type);
     w.Local? local;
@@ -602,10 +617,6 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
   }
 
-  @override
-  void visitLabeledStatement(LabeledStatement node) => defaultStatement(node);
-  @override
-  void visitBreakStatement(BreakStatement node) => defaultStatement(node);
   @override
   void visitSwitchStatement(SwitchStatement node) => defaultStatement(node);
   @override
