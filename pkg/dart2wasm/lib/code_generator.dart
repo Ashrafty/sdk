@@ -634,8 +634,10 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   w.ValueType _visitThis(w.ValueType expectedType) {
-    if (!thisLocal!.type.isSubtypeOf(expectedType) &&
-        preciseThisLocal!.type.isSubtypeOf(expectedType)) {
+    w.ValueType thisType = thisLocal!.type.withNullability(false);
+    w.ValueType preciseThisType = preciseThisLocal!.type.withNullability(false);
+    if (!thisType.isSubtypeOf(expectedType) &&
+        preciseThisType.isSubtypeOf(expectedType)) {
       b.local_get(preciseThisLocal!);
       return preciseThisLocal!.type;
     } else {
@@ -681,12 +683,13 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitSuperMethodInvocation(
       SuperMethodInvocation node, w.ValueType expectedType) {
-    w.ValueType thisType = _visitThis(expectedType);
-    if (options.parameterNullability && thisType.nullable) {
-      b.ref_as_non_null();
-    }
-    _visitArguments(node.arguments, node.interfaceTargetReference!, 1);
-    return _call(node.interfaceTargetReference!);
+    Reference target = node.interfaceTargetReference!;
+    w.BaseFunction targetFunction = translator.functions.getFunction(target);
+    w.ValueType receiverType = targetFunction.type.inputs.first;
+    w.ValueType thisType = _visitThis(receiverType);
+    translator.convertType(function, thisType, receiverType);
+    _visitArguments(node.arguments, target, 1);
+    return _call(target);
   }
 
   @override
@@ -1014,33 +1017,50 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   @override
+  w.ValueType visitSuperPropertyGet(
+      SuperPropertyGet node, w.ValueType expectedType) {
+    return _directGet(node.interfaceTarget!, ThisExpression(), () => null);
+  }
+
+  @override
+  w.ValueType visitSuperPropertySet(
+      SuperPropertySet node, w.ValueType expectedType) {
+    return _directSet(node.interfaceTarget!, ThisExpression(), node.value,
+        preserved: expectedType != voidMarker);
+  }
+
+  @override
   w.ValueType visitInstanceGet(InstanceGet node, w.ValueType expectedType) {
     Member? singleTarget = translator.singleTarget(node);
     if (singleTarget != null) {
-      if (singleTarget is Field) {
-        w.StructType struct =
-            translator.classInfo[singleTarget.enclosingClass]!.struct;
-        int fieldIndex = translator.fieldIndex[singleTarget]!;
-        w.ValueType receiverType = w.RefType.def(struct, nullable: true);
-        w.ValueType fieldType = struct.fields[fieldIndex].type.unpacked;
-        wrap(node.receiver, receiverType);
-        b.struct_get(struct, fieldIndex);
-        return fieldType;
-      } else {
-        // Instance call of getter
-        assert(singleTarget is Procedure && singleTarget.isGetter);
-        w.ValueType? intrinsicResult =
-            intrinsifier.generateInstanceGetterIntrinsic(node);
-        if (intrinsicResult != null) return intrinsicResult;
-        w.BaseFunction targetFunction =
-            translator.functions.getFunction(singleTarget.reference);
-        wrap(node.receiver, targetFunction.type.inputs.single);
-        return _call(singleTarget.reference);
-      }
+      return _directGet(singleTarget, node.receiver,
+          () => intrinsifier.generateInstanceGetterIntrinsic(node));
     } else {
       return _virtualCall(node.interfaceTarget,
           (signature) => wrap(node.receiver, signature.inputs.first), (_) {},
           getter: true, setter: false);
+    }
+  }
+
+  w.ValueType _directGet(
+      Member target, Expression receiver, w.ValueType? Function() intrinsify) {
+    if (target is Field) {
+      w.StructType struct = translator.classInfo[target.enclosingClass]!.struct;
+      int fieldIndex = translator.fieldIndex[target]!;
+      w.ValueType receiverType = w.RefType.def(struct, nullable: true);
+      w.ValueType fieldType = struct.fields[fieldIndex].type.unpacked;
+      wrap(receiver, receiverType);
+      b.struct_get(struct, fieldIndex);
+      return fieldType;
+    } else {
+      // Instance call of getter
+      assert(target is Procedure && target.isGetter);
+      w.ValueType? intrinsicResult = intrinsify();
+      if (intrinsicResult != null) return intrinsicResult;
+      w.BaseFunction targetFunction =
+          translator.functions.getFunction(target.reference);
+      wrap(receiver, targetFunction.type.inputs.single);
+      return _call(target.reference);
     }
   }
 
@@ -1058,32 +1078,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     w.Local? temp;
     Member? singleTarget = translator.singleTarget(node);
     if (singleTarget != null) {
-      if (singleTarget is Field) {
-        w.StructType struct =
-            translator.classInfo[singleTarget.enclosingClass]!.struct;
-        int fieldIndex = translator.fieldIndex[singleTarget]!;
-        w.ValueType receiverType = w.RefType.def(struct, nullable: true);
-        w.ValueType fieldType = struct.fields[fieldIndex].type.unpacked;
-        wrap(node.receiver, receiverType);
-        wrap(node.value, fieldType);
-        if (preserved) {
-          temp = function.addLocal(fieldType);
-          b.local_tee(temp);
-        }
-        b.struct_set(struct, fieldIndex);
-      } else {
-        w.BaseFunction targetFunction =
-            translator.functions.getFunction(singleTarget.reference);
-        w.ValueType paramType = targetFunction.type.inputs.last;
-        wrap(node.receiver, targetFunction.type.inputs.first);
-        wrap(node.value, paramType);
-        if (preserved) {
-          temp = function.addLocal(typeForLocal(paramType));
-          b.local_tee(temp);
-          translator.convertType(function, temp.type, paramType);
-        }
-        _call(singleTarget.reference);
-      }
+      return _directSet(singleTarget, node.receiver, node.value,
+          preserved: preserved);
     } else {
       _virtualCall(node.interfaceTarget,
           (signature) => wrap(node.receiver, signature.inputs.first),
@@ -1095,10 +1091,46 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           b.local_tee(temp!);
         }
       }, getter: false, setter: true);
+      if (preserved) {
+        b.local_get(temp!);
+        return temp!.type;
+      } else {
+        return voidMarker;
+      }
+    }
+  }
+
+  w.ValueType _directSet(Member target, Expression receiver, Expression value,
+      {required bool preserved}) {
+    w.Local? temp;
+    if (target is Field) {
+      w.StructType struct = translator.classInfo[target.enclosingClass]!.struct;
+      int fieldIndex = translator.fieldIndex[target]!;
+      w.ValueType receiverType = w.RefType.def(struct, nullable: true);
+      w.ValueType fieldType = struct.fields[fieldIndex].type.unpacked;
+      wrap(receiver, receiverType);
+      wrap(value, fieldType);
+      if (preserved) {
+        temp = function.addLocal(fieldType);
+        b.local_tee(temp);
+      }
+      b.struct_set(struct, fieldIndex);
+    } else {
+      w.BaseFunction targetFunction =
+          translator.functions.getFunction(target.reference);
+      w.ValueType paramType = targetFunction.type.inputs.last;
+      wrap(receiver, targetFunction.type.inputs.first);
+      wrap(value, paramType);
+      if (preserved) {
+        temp = function.addLocal(typeForLocal(paramType));
+        b.local_tee(temp);
+        translator.convertType(function, temp.type, paramType);
+      }
+      _call(target.reference);
     }
     if (preserved) {
       b.local_get(temp!);
-      return temp!.type;
+      return temp.type;
     } else {
       return voidMarker;
     }
