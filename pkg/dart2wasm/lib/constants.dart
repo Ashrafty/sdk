@@ -26,8 +26,8 @@ class Constants {
 
   Constants(this.translator);
 
-  void instantiateConstant(w.DefinedFunction function, Constant constant,
-      w.ValueType? expectedType) {
+  void instantiateConstant(
+      w.DefinedFunction function, Constant constant, w.ValueType expectedType) {
     constant.accept(ConstantInstantiator(this, function, expectedType));
   }
 }
@@ -35,7 +35,7 @@ class Constants {
 class ConstantInstantiator extends ConstantVisitor<void> {
   final Constants constants;
   final w.DefinedFunction function;
-  final w.ValueType? expectedType;
+  final w.ValueType expectedType;
 
   ConstantInstantiator(this.constants, this.function, this.expectedType);
 
@@ -87,9 +87,15 @@ class ConstantInstantiator extends ConstantVisitor<void> {
   void visitNullConstant(NullConstant node) {
     w.ValueType? expectedType = this.expectedType;
     if (expectedType != constants.translator.voidMarker) {
-      w.HeapType heapType =
-          expectedType is w.RefType ? expectedType.heapType : w.HeapType.data;
-      b.ref_null(heapType);
+      if (expectedType.nullable) {
+        w.HeapType heapType =
+            expectedType is w.RefType ? expectedType.heapType : w.HeapType.data;
+        b.ref_null(heapType);
+      } else {
+        // This only happens in invalid but unreachable code produced by the
+        // TFA dead-code elimination.
+        b.unreachable();
+      }
     }
   }
 
@@ -203,7 +209,6 @@ class ConstantInstantiator extends ConstantVisitor<void> {
       b.global_get(rtt);
       b.struct_new_with_rtt(struct);
     });
-    assert(expectedType == null ||
-        !translator.needsConversion(type, expectedType!));
+    assert(!translator.needsConversion(type, expectedType));
   }
 }
