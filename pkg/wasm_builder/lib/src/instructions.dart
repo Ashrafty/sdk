@@ -160,6 +160,9 @@ class Instructions with SerializerMixin {
 
   bool _verifyBranchTypes(Label label,
       [int popped = 0, List<ValueType> pushed = const []]) {
+    if (!reachable) {
+      return true;
+    }
     final List<ValueType> inputs = label.targetTypes;
     if (_stackTypes.length - popped + pushed.length - inputs.length <
         label.baseStackHeight) {
@@ -180,7 +183,7 @@ class Instructions with SerializerMixin {
   bool _verifyStartOfBlock(Label label, {required List<Object> trace}) {
     return _debugTrace(
         ["$label:", ...trace, FunctionType(label.inputs, label.outputs)],
-        reachableAfter: true, indentAfter: 1);
+        reachableAfter: reachable, indentAfter: 1);
   }
 
   bool _verifyEndOfBlock(List<ValueType> outputs,
