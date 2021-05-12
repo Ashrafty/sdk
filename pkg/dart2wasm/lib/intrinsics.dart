@@ -266,18 +266,10 @@ class Intrinsifier {
 
     if (node.target.enclosingLibrary.name == "dart._internal" &&
         node.name.text == "unsafeCast") {
+      w.ValueType targetType =
+          translator.translateType(node.arguments.types.single);
       Expression operand = node.arguments.positional.single;
-      w.ValueType object = translator.nullableObjectType;
-      DartType targetType = node.arguments.types.single;
-      InterfaceType interfaceType = targetType is InterfaceType
-          ? targetType
-          : translator.coreTypes.objectNullableRawType;
-      ClassInfo info = translator.classInfo[interfaceType.classNode]!;
-      codeGen.wrap(operand, object);
-      b.global_get(info.repr.rtt);
-      b.ref_cast();
-      return w.RefType.def(info.repr.struct,
-          nullable: targetType.isPotentiallyNullable);
+      return codeGen.wrap(operand, targetType);
     }
 
     if (node.target.enclosingClass?.superclass ==
