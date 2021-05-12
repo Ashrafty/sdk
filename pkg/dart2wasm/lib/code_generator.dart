@@ -53,17 +53,17 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   void defaultInitializer(Initializer node) {
-    throw "Not supported: ${node.runtimeType}";
+    throw "Not supported: ${node.runtimeType} at ${node.location}";
   }
 
   @override
   w.ValueType defaultExpression(Expression node, w.ValueType expectedType) {
-    throw "Not supported: ${node.runtimeType}";
+    throw "Not supported: ${node.runtimeType} at ${node.location}";
   }
 
   @override
   void defaultStatement(Statement node) {
-    throw "Not supported: ${node.runtimeType}";
+    throw "Not supported: ${node.runtimeType} at ${node.location}";
   }
 
   void generate(Reference reference, w.DefinedFunction function,
@@ -328,7 +328,6 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   w.ValueType _call(Reference target) {
-    assert(target.asMember is! Field);
     w.BaseFunction targetFunction = translator.functions.getFunction(target);
     if (translator.shouldInline(target)) {
       List<w.Local> inlinedLocals = targetFunction.type.inputs
@@ -692,10 +691,17 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     return _call(node.targetReference);
   }
 
+  Member _lookupSuperTarget(Member interfaceTarget, {required bool setter}) {
+    return translator.hierarchy.getDispatchTarget(
+        member.enclosingClass!.superclass!, interfaceTarget.name,
+        setter: setter)!;
+  }
+
   @override
   w.ValueType visitSuperMethodInvocation(
       SuperMethodInvocation node, w.ValueType expectedType) {
-    Reference target = node.interfaceTargetReference!;
+    Reference target =
+        _lookupSuperTarget(node.interfaceTarget!, setter: false).reference;
     w.BaseFunction targetFunction = translator.functions.getFunction(target);
     w.ValueType receiverType = targetFunction.type.inputs.first;
     w.ValueType thisType = _visitThis(receiverType);
@@ -958,7 +964,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         return temp.type;
       } else {
         b.struct_set(capture.context.struct, capture.fieldIndex);
-        return capture.type;
+        return voidMarker;
       }
     } else {
       if (local == null) {
@@ -1031,13 +1037,15 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitSuperPropertyGet(
       SuperPropertyGet node, w.ValueType expectedType) {
-    return _directGet(node.interfaceTarget!, ThisExpression(), () => null);
+    Member target = _lookupSuperTarget(node.interfaceTarget!, setter: false);
+    return _directGet(target, ThisExpression(), () => null);
   }
 
   @override
   w.ValueType visitSuperPropertySet(
       SuperPropertySet node, w.ValueType expectedType) {
-    return _directSet(node.interfaceTarget!, ThisExpression(), node.value,
+    Member target = _lookupSuperTarget(node.interfaceTarget!, setter: true);
+    return _directSet(target, ThisExpression(), node.value,
         preserved: expectedType != voidMarker);
   }
 
