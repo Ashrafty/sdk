@@ -211,20 +211,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
 
     member.function!.body!.accept(this);
-
-    if (function.type.outputs.length > 0) {
-      w.ValueType returnType = function.type.outputs[0];
-      if (returnType is w.RefType && returnType.nullable) {
-        // Dart body may have an implicit return null.
-        b.ref_null(returnType.heapType);
-      } else {
-        // This point is unreachable, but the Wasm validator still expects the
-        // stack to contain a value matching the Wasm function return type.
-        b.block(const [], function.type.outputs);
-        b.unreachable();
-        b.end();
-      }
-    }
+    _implicitReturn();
     b.end();
   }
 
@@ -279,10 +266,24 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
 
     lambda.functionNode.body!.accept(this);
-    if (lambda.functionNode.returnType is VoidType) {
-      b.ref_null(w.HeapType.def(object.struct));
-    }
+    _implicitReturn();
     b.end();
+  }
+
+  void _implicitReturn() {
+    if (function.type.outputs.length > 0) {
+      w.ValueType returnType = function.type.outputs[0];
+      if (returnType is w.RefType && returnType.nullable) {
+        // Dart body may have an implicit return null.
+        b.ref_null(returnType.heapType);
+      } else {
+        // This point is unreachable, but the Wasm validator still expects the
+        // stack to contain a value matching the Wasm function return type.
+        b.block(const [], function.type.outputs);
+        b.unreachable();
+        b.end();
+      }
+    }
   }
 
   void allocateContext(TreeNode node) {
