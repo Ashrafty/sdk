@@ -608,9 +608,9 @@ class _CompactLinkedIdentityHashSet<E> extends _CompactLinkedHashSet<E>
 }
 
 class _CompactLinkedCustomHashSet<E> extends _CompactLinkedHashSet<E> {
-  final _equality;
-  final _hasher;
-  final _validKey;
+  final bool Function(E, E) _equality;
+  final int Function(E) _hasher;
+  final bool Function(Object?) _validKey;
 
   int _hashCode(e) => _hasher(e);
   bool _equals(e1, e2) => _equality(e1, e2);
