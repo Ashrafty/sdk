@@ -1456,7 +1456,17 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       return w.NumType.i32;
     }
     if (type.typeArguments.any((t) => t is! DynamicType)) {
-      throw "Type test with type arguments not supported";
+      // If the tested-against type as an instance of the static operand type
+      // has the same type arguments as the static operand type, it is not
+      // necessary to test the type arguments.
+      DartType operandType = node.operand.getStaticType(typeContext);
+      Class cls = translator.classForType(operandType);
+      InterfaceType? base = translator.hierarchy
+          .getTypeAsInstanceOf(type, cls, member.enclosingLibrary)
+          ?.withDeclaredNullability(operandType.declaredNullability);
+      if (base != operandType) {
+        throw "Type test with type arguments not supported";
+      }
     }
     List<Class> concrete = translator.subtypes
         .getSubtypesOf(type.classNode)
