@@ -353,7 +353,8 @@ class Translator {
       int parameterCount = functionNode.requiredParameterCount;
       if (functionNode.positionalParameters.length != parameterCount ||
           functionNode.namedParameters.isNotEmpty) {
-        throw "Tear-off with optional parameters not supported";
+        throw "Not supported: Tear-off with optional parameters"
+            " at ${member.location}";
       }
       w.FunctionType memberSignature = signatureFor(member.reference);
       w.FunctionType closureSignature = functionType(parameterCount);

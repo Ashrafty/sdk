@@ -53,17 +53,21 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   void defaultInitializer(Initializer node) {
-    throw "Not supported: ${node.runtimeType} at ${node.location}";
+    print("Not implemented: ${node.runtimeType} at ${node.location}");
+    b.unreachable();
   }
 
   @override
   w.ValueType defaultExpression(Expression node, w.ValueType expectedType) {
-    throw "Not supported: ${node.runtimeType} at ${node.location}";
+    print("Not implemented: ${node.runtimeType} at ${node.location}");
+    b.unreachable();
+    return expectedType;
   }
 
   @override
   void defaultStatement(Statement node) {
-    throw "Not supported: ${node.runtimeType} at ${node.location}";
+    print("Not implemented: ${node.runtimeType} at ${node.location}");
+    b.unreachable();
   }
 
   void generate(Reference reference, w.DefinedFunction function,
@@ -101,6 +105,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
 
     if (member.isExternal) {
+      print("Unimplemented external member $member at ${member.location}");
       b.unreachable();
       b.end();
       return;
@@ -1045,6 +1050,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType visitSuperPropertyGet(
       SuperPropertyGet node, w.ValueType expectedType) {
     Member target = _lookupSuperTarget(node.interfaceTarget!, setter: false);
+    if (target is Procedure && !target.isGetter) {
+      throw "Not supported: Super tear-off at ${node.location}";
+    }
     return _directGet(target, ThisExpression(), () => null);
   }
 
@@ -1472,7 +1480,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           .getTypeAsInstanceOf(type, cls, member.enclosingLibrary)
           ?.withDeclaredNullability(operandType.declaredNullability);
       if (base != operandType) {
-        throw "Type test with type arguments not supported";
+        print("Not implemented: Type test with type arguments"
+            " at ${node.location}");
       }
     }
     List<Class> concrete = translator.subtypes

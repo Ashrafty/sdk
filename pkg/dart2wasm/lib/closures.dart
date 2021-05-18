@@ -176,8 +176,8 @@ class FindCaptures extends RecursiveVisitor {
   void _visitLambda(FunctionNode node) {
     if (node.positionalParameters.length != node.requiredParameterCount ||
         node.namedParameters.isNotEmpty) {
-      throw "Optional parameters not supported for "
-          "function expressions and local functions";
+      throw "Not supported: Optional parameters for "
+          "function expression or local function at ${node.location}";
     }
     int parameterCount = node.requiredParameterCount;
     w.FunctionType type = translator.functionType(parameterCount);

@@ -80,7 +80,8 @@ class ConstantInstantiator extends ConstantVisitor<void> {
   }
 
   void defaultConstant(Constant node) {
-    throw "Unsupported constant: $node";
+    print("Not implemented: $node");
+    b.unreachable();
   }
 
   @override
