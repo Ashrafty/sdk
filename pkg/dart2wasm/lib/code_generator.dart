@@ -161,7 +161,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           paramLocals[implicitParams + paramInfo.nameIndex[param.name]!];
     }
 
-    closures.findCaptures(member.function!);
+    closures.findCaptures(member);
 
     if (implicitParams == 1) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
@@ -182,6 +182,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           Class cls = member.enclosingClass;
           for (Field field in cls.fields) {
             if (field.isInstanceMember && field.initializer != null) {
+              closures.buildContexts(field.initializer!);
               int fieldIndex = translator.fieldIndex[field]!;
               b.local_get(thisLocal!);
               wrap(field.initializer!,
@@ -199,7 +200,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       preciseThisLocal = null;
     }
 
-    closures.buildContexts(member.function!);
+    closures.buildContexts(member);
     allocateContext(member.function!);
     captureParameters();
 

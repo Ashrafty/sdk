@@ -65,7 +65,16 @@ class Closures {
   Translator get translator => codeGen.translator;
 
   void findCaptures(TreeNode node) {
-    node.accept(FindCaptures(this));
+    var find = FindCaptures(this);
+    if (node is Constructor) {
+      Class cls = node.enclosingClass;
+      for (Field field in cls.fields) {
+        if (field.isInstanceMember && field.initializer != null) {
+          field.initializer!.accept(find);
+        }
+      }
+    }
+    node.accept(find);
   }
 
   void buildContexts(TreeNode node) {
@@ -161,6 +170,7 @@ class FindCaptures extends RecursiveVisitor {
   @override
   void visitSuperMethodInvocation(SuperMethodInvocation node) {
     _visitThis();
+    super.visitSuperMethodInvocation(node);
   }
 
   void _visitLambda(FunctionNode node) {
