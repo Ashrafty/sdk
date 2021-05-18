@@ -415,6 +415,12 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   void visitVariableDeclaration(VariableDeclaration node) {
+    if (node.type is VoidType) {
+      if (node.initializer != null) {
+        wrap(node.initializer!, voidMarker);
+      }
+      return;
+    }
     w.ValueType type = translateType(node.type);
     w.Local? local;
     Capture? capture = closures.captures[node];
