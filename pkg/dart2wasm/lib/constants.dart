@@ -28,11 +28,11 @@ class Constants {
 
   void instantiateConstant(
       w.DefinedFunction function, Constant constant, w.ValueType expectedType) {
-    constant.accept(ConstantInstantiator(this, function, expectedType));
+    ConstantInstantiator(this, function, expectedType).instantiate(constant);
   }
 }
 
-class ConstantInstantiator extends ConstantVisitor<void> {
+class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
   final Constants constants;
   final w.DefinedFunction function;
   final w.ValueType expectedType;
@@ -42,6 +42,11 @@ class ConstantInstantiator extends ConstantVisitor<void> {
   Translator get translator => constants.translator;
   w.Module get m => translator.m;
   w.Instructions get b => function.body;
+
+  void instantiate(Constant constant) {
+    w.ValueType resultType = constant.accept(this);
+    translator.convertType(function, resultType, expectedType);
+  }
 
   void instantiateLazyConstant(
       Constant constant, w.RefType type, ConstantCodeGenerator generator) {
@@ -73,19 +78,14 @@ class ConstantInstantiator extends ConstantVisitor<void> {
     b.end();
   }
 
-  void convertType(w.ValueType from, w.ValueType? to) {
-    if (to != null) {
-      translator.convertType(function, from, to);
-    }
-  }
-
-  void defaultConstant(Constant node) {
+  w.ValueType defaultConstant(Constant node) {
     print("Not implemented: $node");
     b.unreachable();
+    return expectedType;
   }
 
   @override
-  void visitNullConstant(NullConstant node) {
+  w.ValueType visitNullConstant(NullConstant node) {
     w.ValueType? expectedType = this.expectedType;
     if (expectedType != constants.translator.voidMarker) {
       if (expectedType.nullable) {
@@ -98,38 +98,40 @@ class ConstantInstantiator extends ConstantVisitor<void> {
         b.unreachable();
       }
     }
+    return expectedType;
   }
 
   @override
-  void visitBoolConstant(BoolConstant constant) {
+  w.ValueType visitBoolConstant(BoolConstant constant) {
     b.i32_const(constant.value ? 1 : 0);
-    convertType(w.NumType.i32, expectedType);
+    return w.NumType.i32;
   }
 
   @override
-  void visitIntConstant(IntConstant constant) {
+  w.ValueType visitIntConstant(IntConstant constant) {
     b.i64_const(constant.value);
-    convertType(w.NumType.i64, expectedType);
+    return w.NumType.i64;
   }
 
   @override
-  void visitDoubleConstant(DoubleConstant constant) {
+  w.ValueType visitDoubleConstant(DoubleConstant constant) {
     b.f64_const(constant.value);
-    convertType(w.NumType.f64, expectedType);
+    return w.NumType.f64;
   }
 
   @override
-  void visitStringConstant(StringConstant constant) {
+  w.ValueType visitStringConstant(StringConstant constant) {
     // TODO: String contents
     ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
     w.Instructions b = function.body;
     b.i32_const(info.classId);
     b.global_get(info.rtt);
     b.struct_new_with_rtt(info.struct);
+    return w.RefType.def(info.struct, nullable: false);
   }
 
   @override
-  void visitInstanceConstant(InstanceConstant constant) {
+  w.ValueType visitInstanceConstant(InstanceConstant constant) {
     ClassInfo info = translator.classInfo[constant.classNode]!;
     w.RefType type = w.RefType.def(info.struct, nullable: false);
     instantiateLazyConstant(constant, type, (function) {
@@ -151,10 +153,11 @@ class ConstantInstantiator extends ConstantVisitor<void> {
       b.global_get(info.rtt);
       b.struct_new_with_rtt(info.struct);
     });
+    return type;
   }
 
   @override
-  void visitListConstant(ListConstant constant) {
+  w.ValueType visitListConstant(ListConstant constant) {
     // TODO: Use unmodifiable list
     ClassInfo info = translator.classInfo[translator.fixedLengthListClass]!;
     w.RefType type = w.RefType.def(info.struct, nullable: false);
@@ -187,10 +190,11 @@ class ConstantInstantiator extends ConstantVisitor<void> {
       b.global_get(info.rtt);
       b.struct_new_with_rtt(info.struct);
     });
+    return type;
   }
 
   @override
-  void visitTearOffConstant(TearOffConstant constant) {
+  w.ValueType visitTearOffConstant(TearOffConstant constant) {
     w.DefinedFunction closureFunction =
         translator.getTearOffFunction(constant.procedureReference.asProcedure);
     int parameterCount = closureFunction.type.inputs.length - 1;
@@ -210,6 +214,6 @@ class ConstantInstantiator extends ConstantVisitor<void> {
       b.global_get(rtt);
       b.struct_new_with_rtt(struct);
     });
-    assert(!translator.needsConversion(type, expectedType));
+    return type;
   }
 }
