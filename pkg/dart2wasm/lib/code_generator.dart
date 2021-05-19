@@ -1359,6 +1359,11 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   @override
+  w.ValueType visitInstantiation(Instantiation node, w.ValueType expectedType) {
+    throw "Not supported: Generic function instantiation at ${node.location}";
+  }
+
+  @override
   w.ValueType visitConstantExpression(
       ConstantExpression node, w.ValueType expectedType) {
     translator.constants
