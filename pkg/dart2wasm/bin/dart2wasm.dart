@@ -46,7 +46,7 @@ import 'package:vm/transformations/lowering.dart' as lowering
 import 'package:vm/transformations/type_flow/signature_shaking.dart';
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 import 'package:vm/transformations/type_flow/transformer.dart'
-    show AnnotateKernel, TFADevirtualization, TreeShaker;
+    show CleanupAnnotations, AnnotateKernel, TFADevirtualization, TreeShaker;
 import 'package:vm/transformations/type_flow/unboxing_info.dart';
 
 import 'package:dart2wasm/transformers.dart' as wasmTrans;
@@ -216,6 +216,7 @@ main(List<String> args) async {
   hackPrintFunction(component, compilerResult.coreTypes);
 
   final hierarchy = compilerResult.classHierarchy as ClosedWorldClassHierarchy;
+  final libraryIndex = new LibraryIndex.all(component);
   final typeFlowAnalysis = TypeFlowAnalysis(
       target,
       component,
@@ -223,10 +224,14 @@ main(List<String> args) async {
       hierarchy,
       GenericInterfacesInfoImpl(hierarchy),
       TypeEnvironment(compilerResult.coreTypes, hierarchy),
-      LibraryIndex.all(component),
+      libraryIndex,
       null,
       null);
   typeFlowAnalysis.addRawCall(DirectSelector(component.mainMethod));
+
+  CleanupAnnotations(compilerResult.coreTypes, libraryIndex, null)
+      .visitComponent(component);
+
   typeFlowAnalysis.process();
 
   final treeShaker =
