@@ -432,7 +432,215 @@ class Instructions with SerializerMixin {
     writeUnsigned(global.index);
   }
 
-  // TODO: memory instructions
+  // Memory instructions
+
+  void _writeMemArg(Memory memory, int offset, int align) {
+    assert(align >= 0 && align < 64);
+    if (memory.index == 0) {
+      writeByte(align);
+      writeUnsigned(offset);
+    } else {
+      writeByte(64 + align);
+      writeUnsigned(offset);
+      writeUnsigned(memory.index);
+    }
+  }
+
+  void i32_load(Memory memory, int offset, [int align = 2]) {
+    assert(align >= 0 && align <= 2);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
+        trace: ['i32.load', memory.index, offset, align]));
+    writeByte(0x28);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_load(Memory memory, int offset, [int align = 3]) {
+    assert(align >= 0 && align <= 3);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
+        trace: ['i64.load', memory.index, offset, align]));
+    writeByte(0x29);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void f32_load(Memory memory, int offset, [int align = 2]) {
+    assert(align >= 0 && align <= 2);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.f32],
+        trace: ['f32.load', memory.index, offset, align]));
+    writeByte(0x2A);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void f64_load(Memory memory, int offset, [int align = 3]) {
+    assert(align >= 0 && align <= 3);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.f64],
+        trace: ['f64.load', memory.index, offset, align]));
+    writeByte(0x2B);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i32_load8_s(Memory memory, int offset, [int align = 0]) {
+    assert(align >= 0 && align <= 0);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
+        trace: ['i32.load8_s', memory.index, offset, align]));
+    writeByte(0x2C);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i32_load8_u(Memory memory, int offset, [int align = 0]) {
+    assert(align >= 0 && align <= 0);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
+        trace: ['i32.load8_u', memory.index, offset, align]));
+    writeByte(0x2D);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i32_load16_s(Memory memory, int offset, [int align = 1]) {
+    assert(align >= 0 && align <= 1);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
+        trace: ['i32.load16_s', memory.index, offset, align]));
+    writeByte(0x2E);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i32_load16_u(Memory memory, int offset, [int align = 1]) {
+    assert(align >= 0 && align <= 1);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
+        trace: ['i32.load16_u', memory.index, offset, align]));
+    writeByte(0x2F);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_load8_s(Memory memory, int offset, [int align = 0]) {
+    assert(align >= 0 && align <= 0);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
+        trace: ['i64.load8_s', memory.index, offset, align]));
+    writeByte(0x30);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_load8_u(Memory memory, int offset, [int align = 0]) {
+    assert(align >= 0 && align <= 0);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
+        trace: ['i64.load8_u', memory.index, offset, align]));
+    writeByte(0x31);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_load16_s(Memory memory, int offset, [int align = 1]) {
+    assert(align >= 0 && align <= 1);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
+        trace: ['i64.load16_s', memory.index, offset, align]));
+    writeByte(0x32);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_load16_u(Memory memory, int offset, [int align = 1]) {
+    assert(align >= 0 && align <= 1);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
+        trace: ['i64.load16_u', memory.index, offset, align]));
+    writeByte(0x33);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_load32_s(Memory memory, int offset, [int align = 2]) {
+    assert(align >= 0 && align <= 2);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
+        trace: ['i64.load32_s', memory.index, offset, align]));
+    writeByte(0x34);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_load32_u(Memory memory, int offset, [int align = 2]) {
+    assert(align >= 0 && align <= 2);
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
+        trace: ['i64.load32_u', memory.index, offset, align]));
+    writeByte(0x35);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i32_store(Memory memory, int offset, [int align = 2]) {
+    assert(align >= 0 && align <= 2);
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [],
+        trace: ['i32.store', memory.index, offset, align]));
+    writeByte(0x36);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_store(Memory memory, int offset, [int align = 3]) {
+    assert(align >= 0 && align <= 3);
+    assert(_verifyTypes(const [NumType.i32, NumType.i64], const [],
+        trace: ['i64.store', memory.index, offset, align]));
+    writeByte(0x37);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void f32_store(Memory memory, int offset, [int align = 2]) {
+    assert(align >= 0 && align <= 2);
+    assert(_verifyTypes(const [NumType.i32, NumType.f32], const [],
+        trace: ['f32.store', memory.index, offset, align]));
+    writeByte(0x38);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void f64_store(Memory memory, int offset, [int align = 3]) {
+    assert(align >= 0 && align <= 3);
+    assert(_verifyTypes(const [NumType.i32, NumType.f64], const [],
+        trace: ['f64.store', memory.index, offset, align]));
+    writeByte(0x39);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i32_store8(Memory memory, int offset, [int align = 0]) {
+    assert(align >= 0 && align <= 0);
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [],
+        trace: ['i32.store8', memory.index, offset, align]));
+    writeByte(0x3A);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i32_store16(Memory memory, int offset, [int align = 1]) {
+    assert(align >= 0 && align <= 1);
+    assert(_verifyTypes(const [NumType.i32, NumType.i32], const [],
+        trace: ['i32.store16', memory.index, offset, align]));
+    writeByte(0x3B);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_store8(Memory memory, int offset, [int align = 0]) {
+    assert(align >= 0 && align <= 0);
+    assert(_verifyTypes(const [NumType.i32, NumType.i64], const [],
+        trace: ['i64.store8', memory.index, offset, align]));
+    writeByte(0x3C);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_store16(Memory memory, int offset, [int align = 1]) {
+    assert(align >= 0 && align <= 1);
+    assert(_verifyTypes(const [NumType.i32, NumType.i64], const [],
+        trace: ['i64.store16', memory.index, offset, align]));
+    writeByte(0x3D);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void i64_store32(Memory memory, int offset, [int align = 2]) {
+    assert(align >= 0 && align <= 2);
+    assert(_verifyTypes(const [NumType.i32, NumType.i64], const [],
+        trace: ['i64.store32', memory.index, offset, align]));
+    writeByte(0x3E);
+    _writeMemArg(memory, offset, align);
+  }
+
+  void memory_size(Memory memory) {
+    assert(_verifyTypes(const [], const [NumType.i32]));
+    writeByte(0x3F);
+    writeUnsigned(memory.index);
+  }
+
+  void memory_grow(Memory memory) {
+    assert(_verifyTypes(const [NumType.i32], const [NumType.i32]));
+    writeByte(0x40);
+    writeUnsigned(memory.index);
+  }
 
   // Reference instructions
 

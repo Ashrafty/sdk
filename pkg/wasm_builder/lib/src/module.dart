@@ -16,6 +16,7 @@ class Module with SerializerMixin {
   final List<DefType> defTypes = [];
   final List<BaseFunction> functions = [];
   final List<Table> tables = [];
+  final List<Memory> memories = [];
   final List<Global> globals = [];
   final List<Export> exports = [];
   BaseFunction? startFunction = null;
@@ -71,6 +72,12 @@ class Module with SerializerMixin {
     return table;
   }
 
+  Memory addMemory(int minSize, [int? maxSize]) {
+    final memory = Memory(memories.length, minSize, maxSize);
+    memories.add(memory);
+    return memory;
+  }
+
   DefinedGlobal addGlobal(GlobalType type) {
     anyGlobalsDefined = true;
     final global = DefinedGlobal(this, globals.length, type);
@@ -117,11 +124,13 @@ class Module with SerializerMixin {
     ImportSection(this).serialize(this);
     FunctionSection(this).serialize(this);
     TableSection(this).serialize(this);
+    MemorySection(this).serialize(this);
     GlobalSection(this).serialize(this);
     ExportSection(this).serialize(this);
     StartSection(this).serialize(this);
     ElementSection(this).serialize(this);
     CodeSection(this).serialize(this);
+    DataSection(this).serialize(this);
     return data;
   }
 }
@@ -252,6 +261,39 @@ class Table implements Serializable {
       s.writeUnsigned(maxSize!);
     }
   }
+}
+
+class Memory implements Serializable {
+  int index;
+  int minSize;
+  int? maxSize;
+  List<Data> data = [];
+
+  Memory(this.index, this.minSize, [this.maxSize]);
+
+  void addData(int offset, Uint8List init) {
+    assert(offset >= 0 && offset + init.length <= minSize);
+    data.add(Data(offset, init));
+  }
+
+  @override
+  void serialize(Serializer s) {
+    if (maxSize == null) {
+      s.writeByte(0x00);
+      s.writeUnsigned(minSize);
+    } else {
+      s.writeByte(0x01);
+      s.writeUnsigned(minSize);
+      s.writeUnsigned(maxSize!);
+    }
+  }
+}
+
+class Data {
+  int offset;
+  Uint8List init;
+
+  Data(this.offset, this.init);
 }
 
 abstract class Global {
@@ -436,6 +478,21 @@ class TableSection extends Section {
   }
 }
 
+class MemorySection extends Section {
+  MemorySection(Module module) : super(module);
+
+  @override
+  int get id => 5;
+
+  @override
+  bool get isNotEmpty => module.memories.isNotEmpty;
+
+  @override
+  void serializeContents() {
+    writeList(module.memories);
+  }
+}
+
 class GlobalSection extends Section {
   GlobalSection(Module module) : super(module);
 
@@ -546,5 +603,32 @@ class CodeSection extends Section {
   @override
   void serializeContents() {
     writeList(module.functions.whereType<DefinedFunction>().toList());
+  }
+}
+
+class DataSection extends Section {
+  DataSection(Module module) : super(module);
+
+  @override
+  int get id => 11;
+
+  @override
+  bool get isNotEmpty =>
+      module.memories.any((memory) => memory.data.isNotEmpty);
+
+  @override
+  void serializeContents() {
+    int length = module.memories.fold(0, (a, m) => a + m.data.length);
+    writeUnsigned(length);
+    for (Memory memory in module.memories) {
+      for (Data data in memory.data) {
+        writeUnsigned(memory.index);
+        writeByte(0x41); // i32.const
+        writeSigned(data.offset);
+        writeByte(0x0B); // end
+        writeUnsigned(data.init.length);
+        writeBytes(data.init);
+      }
+    }
   }
 }

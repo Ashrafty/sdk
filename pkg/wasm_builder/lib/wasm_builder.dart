@@ -11,6 +11,7 @@ export 'src/module.dart'
         ImportedFunction,
         ImportedGlobal,
         Local,
+        Memory,
         Module,
         Table;
 export 'src/types.dart'
