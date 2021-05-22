@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:typed_data';
+
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/translator.dart';
 
@@ -23,8 +25,121 @@ typedef ConstantCodeGenerator = void Function(w.DefinedFunction);
 class Constants {
   final Translator translator;
   final Map<Constant, ConstantInfo> constantInfo = {};
+  final StringBuffer oneByteStrings = StringBuffer();
+  final StringBuffer twoByteStrings = StringBuffer();
+  late final w.DefinedFunction oneByteStringFunction;
+  late final w.DefinedFunction twoByteStringFunction;
+  late final w.DefinedGlobal emptyString;
 
-  Constants(this.translator);
+  Constants(this.translator) {
+    oneByteStringFunction = makeStringFunction(translator.oneByteStringClass);
+    twoByteStringFunction = makeStringFunction(translator.twoByteStringClass);
+    initEmptyString();
+  }
+
+  w.Module get m => translator.m;
+
+  void initEmptyString() {
+    ClassInfo info = translator.classInfo[translator.oneByteStringClass]!;
+    w.ArrayType arrayType =
+        ((info.struct.fields.last.type as w.RefType).heapType as w.DefHeapType)
+            .def as w.ArrayType;
+
+    w.RefType emptyStringType = w.RefType.def(info.struct, nullable: true);
+    emptyString = m.addGlobal(w.GlobalType(emptyStringType));
+    emptyString.initializer.ref_null(emptyStringType.heapType);
+    emptyString.initializer.end();
+
+    w.Instructions b = translator.initFunction.body;
+    b.i32_const(info.classId);
+    b.i32_const(0);
+    b.rtt_canon(arrayType);
+    b.array_new_default_with_rtt(arrayType);
+    b.global_get(info.rtt);
+    b.struct_new_with_rtt(info.struct);
+    b.global_set(emptyString);
+  }
+
+  void finalize() {
+    Uint8List oneByteStringsAsBytes =
+        Uint8List.fromList(oneByteStrings.toString().codeUnits);
+    assert(Endian.host == Endian.little);
+    Uint8List twoByteStringsAsBytes =
+        Uint16List.fromList(twoByteStrings.toString().codeUnits)
+            .buffer
+            .asUint8List();
+    Uint8List stringsAsBytes = (BytesBuilder()
+          ..add(twoByteStringsAsBytes)
+          ..add(oneByteStringsAsBytes))
+        .toBytes();
+
+    w.Memory stringMemory = m.addMemory(
+        stringsAsBytes.length, stringsAsBytes.length)
+      ..addData(0, stringsAsBytes);
+    makeStringFunctionBody(translator.oneByteStringClass, oneByteStringFunction,
+        (b) {
+      b.i32_load8_u(stringMemory, twoByteStringsAsBytes.length);
+    });
+    makeStringFunctionBody(translator.twoByteStringClass, twoByteStringFunction,
+        (b) {
+      b.i32_const(1);
+      b.i32_shl();
+      b.i32_load16_u(stringMemory, 0);
+    });
+  }
+
+  w.DefinedFunction makeStringFunction(Class cls) {
+    ClassInfo info = translator.classInfo[cls]!;
+    w.FunctionType ftype = m.addFunctionType(
+        const [w.NumType.i32, w.NumType.i32],
+        [w.RefType.def(info.struct, nullable: false)]);
+    return m.addFunction(ftype);
+  }
+
+  void makeStringFunctionBody(Class cls, w.DefinedFunction function,
+      void Function(w.Instructions) emitLoad) {
+    ClassInfo info = translator.classInfo[cls]!;
+    w.ArrayType arrayType =
+        ((info.struct.fields.last.type as w.RefType).heapType as w.DefHeapType)
+            .def as w.ArrayType;
+
+    w.Local offset = function.locals[0];
+    w.Local length = function.locals[1];
+    w.Local array = function.addLocal(
+        translator.typeForLocal(w.RefType.def(arrayType, nullable: false)));
+    w.Local index = function.addLocal(w.NumType.i32);
+
+    w.Instructions b = function.body;
+    b.local_get(length);
+    b.rtt_canon(arrayType);
+    b.array_new_default_with_rtt(arrayType);
+    b.local_set(array);
+
+    b.i32_const(0);
+    b.local_set(index);
+    w.Label loop = b.loop();
+    b.local_get(array);
+    b.local_get(index);
+    b.local_get(offset);
+    b.local_get(index);
+    b.i32_add();
+    emitLoad(b);
+    b.array_set(arrayType);
+    b.local_get(index);
+    b.i32_const(1);
+    b.i32_add();
+    b.local_tee(index);
+    b.local_get(length);
+    b.i32_lt_u();
+    b.br_if(loop);
+    b.end();
+
+    b.i32_const(info.classId);
+    b.local_get(array);
+    b.global_get(info.rtt);
+    b.struct_new_with_rtt(info.struct);
+    b.end();
+  }
 
   void instantiateConstant(
       w.DefinedFunction function, Constant constant, w.ValueType expectedType) {
@@ -121,13 +236,31 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
 
   @override
   w.ValueType visitStringConstant(StringConstant constant) {
-    // TODO: String contents
-    ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
     w.Instructions b = function.body;
-    b.i32_const(info.classId);
-    b.global_get(info.rtt);
-    b.struct_new_with_rtt(info.struct);
-    return w.RefType.def(info.struct, nullable: false);
+    if (constant.value.isEmpty) {
+      b.global_get(constants.emptyString);
+      return constants.emptyString.type.type;
+    }
+    bool isOneByte = constant.value.codeUnits.every((c) => c <= 255);
+    ClassInfo info = translator.classInfo[isOneByte
+        ? translator.oneByteStringClass
+        : translator.twoByteStringClass]!;
+    w.RefType type = w.RefType.def(info.struct, nullable: false);
+    instantiateLazyConstant(constant, type, (function) {
+      StringBuffer buffer =
+          isOneByte ? constants.oneByteStrings : constants.twoByteStrings;
+      int offset = buffer.length;
+      int length = constant.value.length;
+      buffer.write(constant.value);
+
+      w.Instructions b = function.body;
+      b.i32_const(offset);
+      b.i32_const(length);
+      b.call(isOneByte
+          ? constants.oneByteStringFunction
+          : constants.twoByteStringFunction);
+    });
+    return type;
   }
 
   @override

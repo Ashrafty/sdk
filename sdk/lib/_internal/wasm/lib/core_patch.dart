@@ -24,6 +24,9 @@ import "dart:_internal"
         patch,
         unsafeCast,
         WasmDataRef,
+        WasmI8,
+        WasmI16,
+        WasmIntArray,
         WasmObjectArray,
         writeIntoOneByteString,
         writeIntoTwoByteString;

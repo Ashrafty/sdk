@@ -59,6 +59,8 @@ class Translator {
   late final Class functionClass;
   late final Class fixedLengthListClass;
   late final Class growableListClass;
+  late final Class oneByteStringClass;
+  late final Class twoByteStringClass;
   late final Procedure mapFactory;
   late final Procedure mapPut;
   late final Map<Class, w.StorageType> builtinTypes;
@@ -75,9 +77,10 @@ class Translator {
   Map<Field, int> fieldIndex = {};
   Map<Reference, ParameterInfo> staticParamInfo = {};
   late Procedure mainFunction;
-  late w.Module m;
-  late w.ValueType voidMarker;
-  late w.StructType dummyContext;
+  late final w.Module m;
+  late final w.DefinedFunction initFunction;
+  late final w.ValueType voidMarker;
+  late final w.StructType dummyContext;
 
   Map<DartType, w.ArrayType> arrayTypeCache = {};
   Map<int, w.StructType> functionTypeCache = {};
@@ -116,6 +119,8 @@ class Translator {
     functionClass = lookupCore("_Function");
     fixedLengthListClass = lookupCore("_List");
     growableListClass = lookupCore("_GrowableList");
+    oneByteStringClass = lookupCore("_OneByteString");
+    twoByteStringClass = lookupCore("_TwoByteString");
     mapFactory = lookupCore("Map").procedures.firstWhere(
         (p) => p.kind == ProcedureKind.Factory && p.name.text == "");
     mapPut = component.libraries
@@ -154,11 +159,14 @@ class Translator {
     dummyContext = m.addStructType("<context>");
 
     ClassInfoCollector(this).collect();
+    functions.collectImports();
+    initFunction = m.addFunction(m.addFunctionType([], []));
+    m.startFunction = initFunction;
+
     globals = Globals(this);
     constants = Constants(this);
 
     dispatchTable.build();
-    functions.collectImports();
 
     mainFunction =
         libraries.first.procedures.firstWhere((p) => p.name.text == "main");
@@ -205,23 +213,29 @@ class Translator {
 
       for (Lambda lambda in codeGen.closures.lambdas.values) {
         codeGen.generateLambda(lambda);
-        if (options.printWasm) {
-          print("#${lambda.function.index}: $exportName (closure)");
-          print(lambda.function.body.trace);
-        }
-      }
-    }
-
-    if (options.printWasm) {
-      for (ConstantInfo info in constants.constantInfo.values) {
-        print("#${info.function.index}: ${info.constant}");
-        print(info.function.body.trace);
+        _printFunction(lambda.function, "$exportName (closure)");
       }
     }
 
     dispatchTable.output();
+    constants.finalize();
+    initFunction.body.end();
+
+    for (ConstantInfo info in constants.constantInfo.values) {
+      _printFunction(info.function, info.constant);
+    }
+    _printFunction(constants.oneByteStringFunction, "makeOneByteString");
+    _printFunction(constants.twoByteStringFunction, "makeTwoByteString");
+    _printFunction(initFunction, "init");
 
     return m;
+  }
+
+  void _printFunction(w.DefinedFunction function, Object name) {
+    if (options.printWasm) {
+      print("#${function.index}: $name");
+      print(function.body.trace);
+    }
   }
 
   Class classForType(DartType type) => type.accept(ClassForType(coreTypes));

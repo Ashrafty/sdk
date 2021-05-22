@@ -90,9 +90,7 @@ abstract class _StringBase implements String {
   // TODO(lrn): See if this limit can be tweaked.
   static const int _maxJoinReplaceOneByteStringLength = 500;
 
-  factory _StringBase._uninstantiable() {
-    throw new UnsupportedError("_StringBase can't be instaniated");
-  }
+  _StringBase._();
 
   @pragma("vm:recognized", "asm-intrinsic")
   int get hashCode native "String_getHashCode";
@@ -242,9 +240,7 @@ abstract class _StringBase implements String {
 
   int codeUnitAt(int index); // Implemented in the subclasses.
 
-  @pragma("vm:recognized", "graph-intrinsic")
-  @pragma("vm:prefer-inline")
-  int get length native "String_getLength";
+  int get length; // Implemented in the subclasses.
 
   @pragma("vm:recognized", "asm-intrinsic")
   @pragma("vm:exact-result-type", bool)
@@ -943,15 +939,19 @@ abstract class _StringBase implements String {
 
 @pragma("wasm:entry-point")
 class _OneByteString extends _StringBase {
-  factory _OneByteString._uninstantiable() {
-    throw "Unreachable";
-  }
+  @pragma("wasm:entry-point")
+  WasmIntArray<WasmI8> _array;
+
+  _OneByteString._withLength(int length)
+      : _array = WasmIntArray<WasmI8>(length),
+        super._();
 
   @pragma("vm:recognized", "asm-intrinsic")
   int get hashCode native "String_getHashCode";
 
-  @pragma("vm:recognized", "graph-intrinsic")
-  int codeUnitAt(int index) native "String_codeUnitAt";
+  int codeUnitAt(int index) => _array.readUnsigned(index);
+
+  int get length => _array.length;
 
   bool _isWhitespace(int codeUnit) {
     return _StringBase._isOneByteWhitespace(codeUnit);
@@ -1237,9 +1237,12 @@ class _OneByteString extends _StringBase {
 
 @pragma("wasm:entry-point")
 class _TwoByteString extends _StringBase {
-  factory _TwoByteString._uninstantiable() {
-    throw "Unreachable";
-  }
+  @pragma("wasm:entry-point")
+  WasmIntArray<WasmI16> _array;
+
+  _TwoByteString._withLength(int length)
+      : _array = WasmIntArray<WasmI16>(length),
+        super._();
 
   // Allocates a string of given length, expecting its content to be
   // set using _setAt.
@@ -1263,8 +1266,9 @@ class _TwoByteString extends _StringBase {
     return _StringBase._isTwoByteWhitespace(codeUnit);
   }
 
-  @pragma("vm:recognized", "graph-intrinsic")
-  int codeUnitAt(int index) native "String_codeUnitAt";
+  int codeUnitAt(int index) => _array.readUnsigned(index);
+
+  int get length => _array.length;
 
   @pragma("vm:recognized", "asm-intrinsic")
   @pragma("vm:exact-result-type", bool)
@@ -1274,7 +1278,7 @@ class _TwoByteString extends _StringBase {
 }
 
 @pragma("vm:entry-point")
-class _ExternalOneByteString extends _StringBase {
+abstract class _ExternalOneByteString extends _StringBase {
   factory _ExternalOneByteString._uninstantiable() {
     throw "Unreachable";
   }
@@ -1292,7 +1296,7 @@ class _ExternalOneByteString extends _StringBase {
 }
 
 @pragma("vm:entry-point")
-class _ExternalTwoByteString extends _StringBase {
+abstract class _ExternalTwoByteString extends _StringBase {
   factory _ExternalTwoByteString._uninstantiable() {
     throw "Unreachable";
   }
