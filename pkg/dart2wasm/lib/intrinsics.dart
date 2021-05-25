@@ -286,12 +286,76 @@ class Intrinsifier {
       return w.NumType.i32;
     }
 
-    if (node.target.enclosingLibrary.name == "dart._internal" &&
-        node.name.text == "unsafeCast") {
-      w.ValueType targetType =
-          translator.translateType(node.arguments.types.single);
-      Expression operand = node.arguments.positional.single;
-      return codeGen.wrap(operand, targetType);
+    if (node.target.enclosingLibrary.name == "dart._internal") {
+      switch (node.name.text) {
+        case "unsafeCast":
+          w.ValueType targetType =
+              translator.translateType(node.arguments.types.single);
+          Expression operand = node.arguments.positional.single;
+          return codeGen.wrap(operand, targetType);
+        case "allocateOneByteString":
+          ClassInfo info = translator.classInfo[translator.oneByteStringClass]!;
+          w.ArrayType arrayType =
+              translator.wasmArrayType(w.PackedType.i8, "WasmI8");
+          Expression length = node.arguments.positional[0];
+          b.i32_const(info.classId);
+          codeGen.wrap(length, w.NumType.i64);
+          b.i32_wrap_i64();
+          b.rtt_canon(arrayType);
+          b.array_new_default_with_rtt(arrayType);
+          b.global_get(info.rtt);
+          b.struct_new_with_rtt(info.struct);
+          return w.RefType.def(info.struct, nullable: false);
+        case "writeIntoOneByteString":
+          ClassInfo info = translator.classInfo[translator.oneByteStringClass]!;
+          w.ArrayType arrayType =
+              translator.wasmArrayType(w.PackedType.i8, "WasmI8");
+          Field arrayField = translator.oneByteStringClass.fields
+              .firstWhere((f) => f.name.text == '_array');
+          int arrayFieldIndex = translator.fieldIndex[arrayField]!;
+          Expression string = node.arguments.positional[0];
+          Expression index = node.arguments.positional[1];
+          Expression codePoint = node.arguments.positional[2];
+          codeGen.wrap(string, w.RefType.def(info.struct, nullable: false));
+          b.struct_get(info.struct, arrayFieldIndex);
+          codeGen.wrap(index, w.NumType.i64);
+          b.i32_wrap_i64();
+          codeGen.wrap(codePoint, w.NumType.i64);
+          b.i32_wrap_i64();
+          b.array_set(arrayType);
+          return codeGen.voidMarker;
+        case "allocateTwoByteString":
+          ClassInfo info = translator.classInfo[translator.twoByteStringClass]!;
+          w.ArrayType arrayType =
+              translator.wasmArrayType(w.PackedType.i16, "WasmI16");
+          Expression length = node.arguments.positional[0];
+          b.i32_const(info.classId);
+          codeGen.wrap(length, w.NumType.i64);
+          b.i32_wrap_i64();
+          b.rtt_canon(arrayType);
+          b.array_new_default_with_rtt(arrayType);
+          b.global_get(info.rtt);
+          b.struct_new_with_rtt(info.struct);
+          return w.RefType.def(info.struct, nullable: false);
+        case "writeIntoTwoByteString":
+          ClassInfo info = translator.classInfo[translator.twoByteStringClass]!;
+          w.ArrayType arrayType =
+              translator.wasmArrayType(w.PackedType.i16, "WasmI16");
+          Field arrayField = translator.oneByteStringClass.fields
+              .firstWhere((f) => f.name.text == '_array');
+          int arrayFieldIndex = translator.fieldIndex[arrayField]!;
+          Expression string = node.arguments.positional[0];
+          Expression index = node.arguments.positional[1];
+          Expression codePoint = node.arguments.positional[2];
+          codeGen.wrap(string, w.RefType.def(info.struct, nullable: false));
+          b.struct_get(info.struct, arrayFieldIndex);
+          codeGen.wrap(index, w.NumType.i64);
+          b.i32_wrap_i64();
+          codeGen.wrap(codePoint, w.NumType.i64);
+          b.i32_wrap_i64();
+          b.array_set(arrayType);
+          return codeGen.voidMarker;
+      }
     }
 
     if (node.target.enclosingClass?.superclass ==

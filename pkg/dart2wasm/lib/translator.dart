@@ -83,7 +83,7 @@ class Translator {
   late final w.ValueType voidMarker;
   late final w.StructType dummyContext;
 
-  Map<DartType, w.ArrayType> arrayTypeCache = {};
+  Map<w.StorageType, w.ArrayType> arrayTypeCache = {};
   Map<int, w.StructType> functionTypeCache = {};
   Map<w.StructType, int> functionTypeParameterCount = {};
   Map<int, w.DefinedGlobal> functionTypeRtt = {};
@@ -318,10 +318,13 @@ class Translator {
 
   w.ArrayType arrayType(DartType type) {
     while (type is TypeParameterType) type = type.bound;
-    return arrayTypeCache.putIfAbsent(
-        type,
-        () => m.addArrayType("Array<${type.toText(defaultAstTextStrategy)}>")
-          ..elementType = w.FieldType(translateStorageType(type)));
+    return wasmArrayType(
+        translateStorageType(type), type.toText(defaultAstTextStrategy));
+  }
+
+  w.ArrayType wasmArrayType(w.StorageType type, String name) {
+    return arrayTypeCache.putIfAbsent(type,
+        () => m.addArrayType("Array<$name>")..elementType = w.FieldType(type));
   }
 
   w.StructType functionStructType(int parameterCount) {
