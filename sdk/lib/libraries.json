@@ -164,6 +164,7 @@
         "patches": [
           "_internal/wasm/lib/internal_patch.dart",
           "_internal/wasm/lib/patch.dart",
+          "_internal/wasm/lib/print_patch.dart",
           "_internal/wasm/lib/wasm_types.dart"
         ]
       },

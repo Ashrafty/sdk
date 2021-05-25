@@ -13,10 +13,18 @@ var bytes = readbuffer(arguments[0]);
 // Create a Wasm module from the arraybuffer bytes.
 var module = new WebAssembly.Module(bytes);
 
+var writeFun = (typeof write !== 'undefined') ? write : process.stdout.write;
+function printChar(char) {
+    write(String.fromCharCode(char));
+}
+
 // Instantiate Wasm module, importing some functions.
 var importObject = {
     console: {
         log: console.log
+    },
+    dart2wasm: {
+        printChar: printChar
     },
     Date: {
         now: Date.now

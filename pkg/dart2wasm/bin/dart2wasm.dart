@@ -213,8 +213,6 @@ main(List<String> args) async {
       await kernelForProgram(mainUri, compilerOptions);
   Component component = compilerResult.component;
 
-  hackPrintFunction(component, compilerResult.coreTypes);
-
   final hierarchy = compilerResult.classHierarchy as ClosedWorldClassHierarchy;
   final libraryIndex = new LibraryIndex.all(component);
   final typeFlowAnalysis = TypeFlowAnalysis(
@@ -263,24 +261,4 @@ main(List<String> args) async {
       tableSelectorAssigner,
       options);
   File(output).writeAsBytesSync(translator.translate().encode());
-}
-
-void hackPrintFunction(Component component, CoreTypes coreTypes) {
-  Procedure printMember = component.libraries
-      .firstWhere((l) => l.name == "dart.core")
-      .procedures
-      .firstWhere((p) => p.name.text == "print");
-  Class externalName = component.libraries
-      .firstWhere((l) => l.name == "dart._internal")
-      .classes
-      .firstWhere((cls) => cls.name == "ExternalName");
-  Field externalNameField = externalName.fields.single;
-  printMember.function.positionalParameters[0].type =
-      coreTypes.intNonNullableRawType;
-  printMember.isExternal = true;
-  printMember.function.body = null;
-  printMember.addAnnotation(ConstantExpression(InstanceConstant(
-      externalName.reference,
-      [],
-      {externalNameField.getterReference: StringConstant("console.log")})));
 }
