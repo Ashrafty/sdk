@@ -10,57 +10,36 @@ class _BoxedInt implements int {
   @pragma("wasm:entry-point")
   int value = 0;
 
-  num operator +(num other) => throw "+";
-  num operator -(num other) => throw "-";
-  num operator *(num other) => throw "*";
+  num operator +(num other) native;
+  num operator -(num other) native;
+  num operator *(num other) native;
 
-  int operator ~/(num other) {
-    if ((other is int) && (other == 0)) {
-      throw "Division by zero";//const IntegerDivisionByZeroException();
-    }
-    throw "~/";
-  }
+  int operator ~/(num other) native;
 
   double operator /(num other) {
     return this.toDouble() / other.toDouble();
   }
 
-  num operator %(num other) {
-    if ((other is int) && (other == 0)) {
-      throw "Division by zero";//const IntegerDivisionByZeroException();
-    }
-    throw "%";
-  }
+  num operator %(num other) native;
 
-  int operator -() => throw "unary-";
+  int operator -() native;
 
-  int operator &(int other) => throw "&";
-  int operator |(int other) => throw "|";
-  int operator ^(int other) => throw "^";
+  int operator &(int other) native;
+  int operator |(int other) native;
+  int operator ^(int other) native;
 
-  num remainder(num other) {
-    throw "remainder";
-  }
+  num remainder(num other) => other is int
+      ? this - (this ~/ other) * other
+      : toDouble().remainder(other);
 
-  int operator >>(int other) => throw ">>";
-  int operator >>>(int other) => throw ">>>";
-  int operator <<(int other) => throw "<<";
+  int operator >>(int other) native;
+  int operator >>>(int other) native;
+  int operator <<(int other) native;
 
-  bool operator <(num other) {
-    return other > this;
-  }
-
-  bool operator >(num other) {
-    throw ">";
-  }
-
-  bool operator >=(num other) {
-    return (this == other) || (this > other);
-  }
-
-  bool operator <=(num other) {
-    return (this == other) || (this < other);
-  }
+  bool operator <(num other) native;
+  bool operator >(num other) native;
+  bool operator >=(num other) native;
+  bool operator <=(num other) native;
 
   bool operator ==(Object other) {
     return other is int
@@ -210,9 +189,7 @@ class _BoxedInt implements int {
     return this;
   }
 
-  double toDouble() {
-    throw "toDouble";
-  }
+  double toDouble() native;
 
   String toStringAsFixed(int fractionDigits) {
     return this.toDouble().toStringAsFixed(fractionDigits);
@@ -449,7 +426,7 @@ class _BoxedInt implements int {
 
   int get hashCode => this;
   int get _identityHashCode => this;
-  int operator ~() => throw "~'";
+  int operator ~() native;
   int get bitLength native;
 
   /**
