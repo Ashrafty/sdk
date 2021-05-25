@@ -129,7 +129,8 @@ class Intrinsifier {
   }
 
   w.ValueType? generateInstanceIntrinsic(InstanceInvocation node) {
-    DartType receiverType = dartTypeOf(node.receiver);
+    Expression receiver = node.receiver;
+    DartType receiverType = dartTypeOf(receiver);
     String name = node.name.text;
     if (node.interfaceTarget.enclosingClass?.superclass ==
         translator.wasmArrayBaseClass) {
@@ -146,7 +147,7 @@ class Intrinsifier {
         case 'readSigned':
         case 'readUnsigned':
           bool unsigned = name == 'readUnsigned';
-          Expression array = node.receiver;
+          Expression array = receiver;
           Expression index = node.arguments.positional.single;
           codeGen.wrap(array, w.RefType.def(arrayType, nullable: true));
           codeGen.wrap(index, w.NumType.i64);
@@ -175,7 +176,7 @@ class Intrinsifier {
           }
           return wasmType.unpacked;
         case 'write':
-          Expression array = node.receiver;
+          Expression array = receiver;
           Expression index = node.arguments.positional[0];
           Expression value = node.arguments.positional[1];
           codeGen.wrap(array, w.RefType.def(arrayType, nullable: true));
@@ -194,6 +195,26 @@ class Intrinsifier {
         default:
           throw "Unsupported array method: $name";
       }
+    }
+
+    if (receiver is ConstantExpression &&
+        receiver.constant is ListConstant &&
+        name == '[]') {
+      ClassInfo info = translator.classInfo[translator.listBaseClass]!;
+      w.RefType listType = w.RefType.def(info.struct, nullable: true);
+      Field arrayField = translator.listBaseClass.fields
+          .firstWhere((f) => f.name.text == '_data');
+      int arrayFieldIndex = translator.fieldIndex[arrayField]!;
+      w.ArrayType arrayType =
+          ((info.struct.fields[arrayFieldIndex].type as w.RefType).heapType
+                  as w.DefHeapType)
+              .def as w.ArrayType;
+      codeGen.wrap(receiver, listType);
+      b.struct_get(info.struct, arrayFieldIndex);
+      codeGen.wrap(node.arguments.positional.single, w.NumType.i64);
+      b.i32_wrap_i64();
+      b.array_get(arrayType);
+      return translator.nullableObjectType;
     }
 
     if (node.arguments.positional.length == 1) {

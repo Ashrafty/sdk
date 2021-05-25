@@ -57,6 +57,7 @@ class Translator {
   late final Class boxedIntClass;
   late final Class boxedDoubleClass;
   late final Class functionClass;
+  late final Class listBaseClass;
   late final Class fixedLengthListClass;
   late final Class growableListClass;
   late final Class oneByteStringClass;
@@ -118,6 +119,7 @@ class Translator {
     boxedDoubleClass = lookupCore("_BoxedDouble");
     functionClass = lookupCore("_Function");
     fixedLengthListClass = lookupCore("_List");
+    listBaseClass = lookupCore("_ListBase");
     growableListClass = lookupCore("_GrowableList");
     oneByteStringClass = lookupCore("_OneByteString");
     twoByteStringClass = lookupCore("_TwoByteString");
