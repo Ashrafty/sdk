@@ -62,6 +62,7 @@ class Translator {
   late final Class growableListClass;
   late final Class oneByteStringClass;
   late final Class twoByteStringClass;
+  late final Procedure stringInterpolate;
   late final Procedure mapFactory;
   late final Procedure mapPut;
   late final Map<Class, w.StorageType> builtinTypes;
@@ -123,6 +124,9 @@ class Translator {
     growableListClass = lookupCore("_GrowableList");
     oneByteStringClass = lookupCore("_OneByteString");
     twoByteStringClass = lookupCore("_TwoByteString");
+    stringInterpolate = lookupCore("_StringBase")
+        .procedures
+        .firstWhere((p) => p.name.text == "_interpolate");
     mapFactory = lookupCore("Map").procedures.firstWhere(
         (p) => p.kind == ProcedureKind.Factory && p.name.text == "");
     mapPut = component.libraries

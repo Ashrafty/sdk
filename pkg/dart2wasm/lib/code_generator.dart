@@ -1338,16 +1338,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitStringConcatenation(
       StringConcatenation node, w.ValueType expectedType) {
-    // TODO: Call toString and concatenate
-    for (Expression expression in node.expressions) {
-      wrap(expression, translator.nullableObjectType);
-      b.drop();
-    }
-    ClassInfo info = translator.classInfo[translator.coreTypes.stringClass]!;
-    b.i32_const(info.classId);
-    b.global_get(info.rtt);
-    b.struct_new_with_rtt(info.struct);
-    return w.RefType.def(info.struct, nullable: false);
+    _makeList(node.expressions, translator.fixedLengthListClass);
+    return _call(translator.stringInterpolate.reference);
   }
 
   @override
@@ -1405,12 +1397,16 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   w.ValueType visitListLiteral(ListLiteral node, w.ValueType expectedType) {
-    ClassInfo info = translator.classInfo[translator.growableListClass]!;
+    return _makeList(node.expressions, translator.growableListClass);
+  }
+
+  w.ValueType _makeList(List<Expression> expressions, Class cls) {
+    ClassInfo info = translator.classInfo[cls]!;
     w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
     w.ArrayType arrayType =
         (refType.heapType as w.DefHeapType).def as w.ArrayType;
     w.ValueType elementType = arrayType.elementType.type.unpacked;
-    int length = node.expressions.length;
+    int length = expressions.length;
 
     b.i32_const(info.classId);
     b.i64_const(length);
@@ -1423,7 +1419,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       for (int i = 0; i < length; i++) {
         b.local_get(arrayLocal);
         b.i32_const(i);
-        wrap(node.expressions[i], elementType);
+        wrap(expressions[i], elementType);
         b.array_set(arrayType);
       }
       b.local_get(arrayLocal);

@@ -14,9 +14,6 @@ class String {
   @patch
   factory String.fromCharCodes(Iterable<int> charCodes,
       [int start = 0, int? end]) {
-    // TODO: Remove these null checks once all code is opted into strong nonnullable mode.
-    if (charCodes == null) throw new ArgumentError.notNull("charCodes");
-    if (start == null) throw new ArgumentError.notNull("start");
     return _StringBase.createFromCharCodes(charCodes, start, end, null);
   }
 
@@ -27,8 +24,7 @@ class String {
         return _OneByteString._allocate(1).._setAt(0, charCode);
       }
       if (charCode <= 0xffff) {
-        return _StringBase._createFromCodePoints(
-            new _List(1)..[0] = charCode, 0, 1);
+        return _TwoByteString._allocate(1).._setAt(0, charCode);
       }
       if (charCode <= 0x10ffff) {
         var low = 0xDC00 | (charCode & 0x3ff);
@@ -92,11 +88,7 @@ abstract class _StringBase implements String {
 
   _StringBase._();
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  int get hashCode native "String_getHashCode";
-
-  @pragma("vm:recognized", "asm-intrinsic")
-  int get _identityHashCode native "String_getHashCode";
+  int get hashCode;
 
   bool get _isOneByte {
     // Alternatively return false and override it on one-byte string classes.
@@ -213,8 +205,6 @@ abstract class _StringBase implements String {
     return createFromCharCodes(charCodeList, 0, length, bits);
   }
 
-  // Inlining is disabled as a workaround to http://dartbug.com/37800.
-  @pragma("vm:never-inline")
   static String _createOneByteString(List<int> charCodes, int start, int len) {
     // It's always faster to do this in Dart than to call into the runtime.
     var s = _OneByteString._allocate(len);
@@ -235,28 +225,24 @@ abstract class _StringBase implements String {
   static String _createFromCodePoints(List<int> codePoints, int start, int end)
       native "StringBase_createFromCodePoints";
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  String operator [](int index) native "String_charAt";
+  String operator [](int index) => String.fromCharCode(codeUnitAt(index));
 
   int codeUnitAt(int index); // Implemented in the subclasses.
 
   int get length; // Implemented in the subclasses.
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  @pragma("vm:exact-result-type", bool)
   bool get isEmpty {
     return this.length == 0;
   }
 
   bool get isNotEmpty => !isEmpty;
 
-  String operator +(String other) native "String_concat";
+  String operator +(String other) => _interpolate([this, other]);
 
   String toString() {
     return this;
   }
 
-  @pragma("vm:exact-result-type", bool)
   bool operator ==(Object other) {
     if (identical(this, other)) {
       return true;
@@ -292,8 +278,6 @@ abstract class _StringBase implements String {
     return 0;
   }
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  @pragma("vm:exact-result-type", bool)
   bool _substringMatches(int start, String other) {
     if (other.isEmpty) return true;
     final len = other.length;
@@ -809,24 +793,12 @@ abstract class _StringBase implements String {
     return buffer.toString();
   }
 
-  // Convert single object to string.
-  @pragma("vm:entry-point", "call")
-  static String _interpolateSingle(Object? o) {
-    if (o is String) return o;
-    final s = o.toString();
-    if (s is! String) {
-      throw new ArgumentError(s);
-    }
-    return s;
-  }
-
   /**
    * Convert all objects in [values] to strings and concat them
    * into a result string.
    * Modifies the input list if it contains non-`String` values.
    */
-  @pragma("vm:recognized", "other")
-  @pragma("vm:entry-point", "call")
+  @pragma("wasm:entry-point", "call")
   static String _interpolate(final List values) {
     final numValues = values.length;
     int totalLength = 0;
@@ -838,17 +810,11 @@ abstract class _StringBase implements String {
       if (s is _OneByteString) {
         totalLength += s.length;
         i++;
-      } else if (s is! String) {
-        throw new ArgumentError(s);
       } else {
         // Handle remaining elements without checking for one-byte-ness.
         while (++i < numValues) {
           final e = values[i];
-          final s = e.toString();
-          values[i] = s;
-          if (s is! String) {
-            throw new ArgumentError(s);
-          }
+          values[i] = e.toString();
         }
         return _concatRangeNative(values, 0, numValues);
       }
@@ -933,8 +899,21 @@ abstract class _StringBase implements String {
 
   // Call this method if all elements of [strings] are known to be strings
   // but not all are known to be OneByteString(s).
-  static String _concatRangeNative(List strings, int start, int end)
-      native "String_concatRange";
+  static String _concatRangeNative(List strings, int start, int end) {
+    int totalLength = 0;
+    for (int i = start; i < end; i++) {
+      totalLength += unsafeCast<_StringBase>(strings[i]).length;
+    }
+    _TwoByteString result = _TwoByteString._allocate(totalLength);
+    int offset = 0;
+    for (int i = start; i < end; i++) {
+      _StringBase s = unsafeCast<_StringBase>(strings[i]);
+      offset = s._copyIntoTwoByteString(result, offset);
+    }
+    return result;
+  }
+
+  int _copyIntoTwoByteString(_TwoByteString result, int offset);
 }
 
 @pragma("wasm:entry-point")
@@ -980,21 +959,30 @@ class _OneByteString extends _StringBase {
 
   // All element of 'strings' must be OneByteStrings.
   static _concatAll(List strings, int totalLength) {
-    if (totalLength > 128) {
-      // Native is quicker.
-      return _StringBase._concatRangeNative(strings, 0, strings.length);
-    }
-    final res = _OneByteString._allocate(totalLength);
+    final result = _OneByteString._allocate(totalLength);
+    final to = result._array;
     final stringsLength = strings.length;
-    int rIx = 0;
-    for (int i = 0; i < stringsLength; i++) {
-      final _OneByteString e = strings[i];
-      final eLength = e.length;
-      for (int s = 0; s < eLength; s++) {
-        res._setAt(rIx++, e.codeUnitAt(s));
+    int j = 0;
+    for (int s = 0; s < stringsLength; s++) {
+      final _OneByteString e = unsafeCast<_OneByteString>(strings[s]);
+      final from = e._array;
+      final length = from.length;
+      for (int i = 0; i < length; i++) {
+        to.write(j++, from.readUnsigned(i));
       }
     }
-    return res;
+    return result;
+  }
+
+  int _copyIntoTwoByteString(_TwoByteString result, int offset) {
+    final from = _array;
+    final int length = from.length;
+    final to = result._array;
+    int j = offset;
+    for (int i = 0; i < length; i++) {
+      to.write(j++, from.readUnsigned(i));
+    }
+    return j;
   }
 
   int indexOf(Pattern pattern, [int start = 0]) {
@@ -1274,6 +1262,17 @@ class _TwoByteString extends _StringBase {
   @pragma("vm:exact-result-type", bool)
   bool operator ==(Object other) {
     return super == other;
+  }
+
+  int _copyIntoTwoByteString(_TwoByteString result, int offset) {
+    final from = _array;
+    final int length = from.length;
+    final to = result._array;
+    int j = offset;
+    for (int i = 0; i < length; i++) {
+      to.write(j++, from.readUnsigned(i));
+    }
+    return j;
   }
 }
 
