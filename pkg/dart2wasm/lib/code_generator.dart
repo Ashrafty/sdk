@@ -51,23 +51,27 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   w.ValueType typeForLocal(w.ValueType type) => translator.typeForLocal(type);
 
-  @override
-  void defaultInitializer(Initializer node) {
-    print("Not implemented: ${node.runtimeType} at ${node.location}");
+  void _unimplemented(TreeNode node) {
+    final text = "Not implemented: ${node.runtimeType} at ${node.location}";
+    print(text);
+    b.comment(text);
     b.unreachable();
   }
 
   @override
+  void defaultInitializer(Initializer node) {
+    _unimplemented(node);
+  }
+
+  @override
   w.ValueType defaultExpression(Expression node, w.ValueType expectedType) {
-    print("Not implemented: ${node.runtimeType} at ${node.location}");
-    b.unreachable();
+    _unimplemented(node);
     return expectedType;
   }
 
   @override
   void defaultStatement(Statement node) {
-    print("Not implemented: ${node.runtimeType} at ${node.location}");
-    b.unreachable();
+    _unimplemented(node);
   }
 
   void generate(Reference reference, w.DefinedFunction function,
@@ -105,7 +109,10 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
 
     if (member.isExternal) {
-      print("Unimplemented external member $member at ${member.location}");
+      final text =
+          "Unimplemented external member $member at ${member.location}";
+      print(text);
+      b.comment(text);
       b.unreachable();
       b.end();
       return;
@@ -211,6 +218,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
     if (options.stubBodies) {
       member.function!.body!.accept(StubBodyTraversal(this));
+      b.comment("Stubbed body");
       b.unreachable();
       b.end();
       return;
@@ -266,6 +274,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     captureParameters();
 
     if (options.stubBodies) {
+      b.comment("Stubbed body");
       b.unreachable();
       b.end();
       return;
@@ -286,6 +295,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         // This point is unreachable, but the Wasm validator still expects the
         // stack to contain a value matching the Wasm function return type.
         b.block(const [], function.type.outputs);
+        b.comment("Unreachable implicit return");
         b.unreachable();
         b.end();
       }
@@ -736,9 +746,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       _visitArguments(node.arguments, node.interfaceTargetReference, 1);
       return _call(singleTarget.reference);
     }
-    return _virtualCall(
-        target, (signature) => wrap(node.receiver, signature.inputs.first),
-        (_) {
+    return _virtualCall(node, target,
+        (signature) => wrap(node.receiver, signature.inputs.first), (_) {
       _visitArguments(node.arguments, node.interfaceTargetReference, 1);
     }, getter: false, setter: false);
   }
@@ -797,7 +806,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         right();
         _call(singleTarget.reference);
       } else {
-        _virtualCall(node.interfaceTarget, left, right,
+        _virtualCall(node, node.interfaceTarget, left, right,
             getter: false, setter: false);
       }
       if (leftNullable || rightNullable) {
@@ -828,6 +837,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   w.ValueType _virtualCall(
+      TreeNode node,
       Member interfaceTarget,
       void pushReceiver(w.FunctionType signature),
       void pushArguments(w.FunctionType signature),
@@ -849,6 +859,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         pushArguments(selector.signature);
         return _call(selector.singularTarget!);
       } else {
+        b.comment("Virtual call of ${selector.name} with no targets"
+            " at ${node.location}");
         b.unreachable();
         return translator.nonNullableObjectType;
       }
@@ -1071,7 +1083,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       return _directGet(singleTarget, node.receiver,
           () => intrinsifier.generateInstanceGetterIntrinsic(node));
     } else {
-      return _virtualCall(node.interfaceTarget,
+      return _virtualCall(node, node.interfaceTarget,
           (signature) => wrap(node.receiver, signature.inputs.first), (_) {},
           getter: true, setter: false);
     }
@@ -1102,7 +1114,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitInstanceTearOff(
       InstanceTearOff node, w.ValueType expectedType) {
-    return _virtualCall(node.interfaceTarget,
+    return _virtualCall(node, node.interfaceTarget,
         (signature) => wrap(node.receiver, signature.inputs.first), (_) {},
         getter: true, setter: false);
   }
@@ -1116,7 +1128,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       return _directSet(singleTarget, node.receiver, node.value,
           preserved: preserved);
     } else {
-      _virtualCall(node.interfaceTarget,
+      _virtualCall(node, node.interfaceTarget,
           (signature) => wrap(node.receiver, signature.inputs.first),
           (signature) {
         w.ValueType paramType = signature.inputs.last;
@@ -1346,6 +1358,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType visitThrow(Throw node, w.ValueType expectedType) {
     wrap(node.expression, translator.nullableObjectType);
     // TODO: Throw exception
+    b.comment(node.toStringInternal());
     b.unreachable();
     return expectedType;
   }

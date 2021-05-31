@@ -99,6 +99,14 @@ class Instructions with SerializerMixin {
     return true;
   }
 
+  bool _comment(String text) {
+    if (traceEnabled) {
+      final String line = "  " * _indent + ";; $text\n";
+      _traceLines.add(line);
+    }
+    return true;
+  }
+
   Never _reportError(String error) {
     throw "$trace\n$error";
   }
@@ -206,6 +214,12 @@ class Instructions with SerializerMixin {
         reachableAfter: reachableAfter,
         indentBefore: -1,
         indentAfter: reindent ? 1 : 0);
+  }
+
+  // Meta
+
+  void comment(String text) {
+    assert(_comment(text));
   }
 
   // Control instructions

@@ -194,7 +194,9 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
   }
 
   w.ValueType defaultConstant(Constant node) {
-    print("Not implemented: $node");
+    final text = "Not implemented: $node";
+    print(text);
+    b.comment(text);
     b.unreachable();
     return expectedType;
   }
@@ -210,6 +212,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
       } else {
         // This only happens in invalid but unreachable code produced by the
         // TFA dead-code elimination.
+        b.comment("Non-nullable null constant");
         b.unreachable();
       }
     }

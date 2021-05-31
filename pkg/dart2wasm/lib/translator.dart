@@ -436,6 +436,7 @@ class Translator {
         } else {
           // This only happens in invalid but unreachable code produced by the
           // TFA dead-code elimination.
+          b.comment("Non-nullable void conversion");
           b.unreachable();
         }
         return;
