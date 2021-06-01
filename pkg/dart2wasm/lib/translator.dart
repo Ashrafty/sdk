@@ -60,8 +60,10 @@ class Translator {
   late final Class listBaseClass;
   late final Class fixedLengthListClass;
   late final Class growableListClass;
+  late final Class stringBaseClass;
   late final Class oneByteStringClass;
   late final Class twoByteStringClass;
+  late final Procedure stringEquals;
   late final Procedure stringInterpolate;
   late final Procedure mapFactory;
   late final Procedure mapPut;
@@ -122,10 +124,12 @@ class Translator {
     fixedLengthListClass = lookupCore("_List");
     listBaseClass = lookupCore("_ListBase");
     growableListClass = lookupCore("_GrowableList");
+    stringBaseClass = lookupCore("_StringBase");
     oneByteStringClass = lookupCore("_OneByteString");
     twoByteStringClass = lookupCore("_TwoByteString");
-    stringInterpolate = lookupCore("_StringBase")
-        .procedures
+    stringEquals =
+        stringBaseClass.procedures.firstWhere((p) => p.name.text == "==");
+    stringInterpolate = stringBaseClass.procedures
         .firstWhere((p) => p.name.text == "_interpolate");
     mapFactory = lookupCore("Map").procedures.firstWhere(
         (p) => p.kind == ProcedureKind.Factory && p.name.text == "");

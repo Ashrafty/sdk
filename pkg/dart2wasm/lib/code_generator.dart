@@ -36,6 +36,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.Local? preciseThisLocal;
   List<Statement> finalizers = [];
   Map<LabeledStatement, w.Label> labels = {};
+  Map<SwitchCase, w.Label> switchLabels = {};
 
   late w.Instructions b;
 
@@ -640,10 +641,122 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   @override
-  void visitSwitchStatement(SwitchStatement node) => defaultStatement(node);
+  void visitSwitchStatement(SwitchStatement node) {
+    bool check<L extends Expression, C extends Constant>() =>
+        node.cases.expand((c) => c.expressions).every((e) =>
+            e is L ||
+            e is NullLiteral ||
+            e is ConstantExpression &&
+                (e.constant is C || e.constant is NullConstant));
+
+    // Identify kind of switch
+    w.ValueType valueType;
+    w.ValueType nullableType;
+    void Function() compare;
+    if (check<BoolLiteral, BoolConstant>()) {
+      // bool switch
+      valueType = w.NumType.i32;
+      nullableType = w.RefType.def(
+          translator.classInfo[translator.boxedBoolClass]!.struct,
+          nullable: true);
+      compare = () => b.i32_eq();
+    } else if (check<IntLiteral, IntConstant>()) {
+      // int switch
+      valueType = w.NumType.i64;
+      nullableType = w.RefType.def(
+          translator.classInfo[translator.boxedIntClass]!.struct,
+          nullable: true);
+      compare = () => b.i64_eq();
+    } else if (check<StringLiteral, StringConstant>()) {
+      // String switch
+      valueType = w.RefType.def(
+          translator.classInfo[translator.stringBaseClass]!.struct,
+          nullable: false);
+      nullableType = valueType.withNullability(true);
+      compare = () => _call(translator.stringEquals.reference);
+    } else {
+      // Object switch
+      assert(check<InvalidExpression, InstanceConstant>());
+      valueType = translator.nonNullableObjectType;
+      nullableType = translator.nullableObjectType;
+      compare = () => b.ref_eq();
+    }
+    w.Local valueLocal = function.addLocal(typeForLocal(valueType));
+
+    // Special cases
+    SwitchCase? defaultCase = node.cases
+        .cast<SwitchCase?>()
+        .firstWhere((c) => c!.isDefault, orElse: () => null);
+    SwitchCase? nullCase = node.cases.cast<SwitchCase?>().firstWhere(
+        (c) => c!.expressions.any((e) =>
+            e is NullLiteral ||
+            e is ConstantExpression && e.constant is NullConstant),
+        orElse: () => null);
+
+    // Set up blocks, in reverse order of cases so they end in forward order
+    w.Label doneLabel = b.block();
+    for (SwitchCase c in node.cases.reversed) {
+      switchLabels[c] = b.block();
+    }
+
+    // Compute value and handle null
+    bool isNullable =
+        node.expression.getStaticType(typeContext).isPotentiallyNullable;
+    if (isNullable) {
+      w.Label nullLabel = nullCase != null
+          ? switchLabels[nullCase]!
+          : defaultCase != null
+              ? switchLabels[defaultCase]!
+              : doneLabel;
+      wrap(node.expression, nullableType);
+      b.br_on_null(nullLabel);
+      translator.convertType(
+          function, nullableType.withNullability(false), valueType);
+    } else {
+      assert(nullCase == null);
+      wrap(node.expression, valueType);
+    }
+    b.local_set(valueLocal);
+
+    // Compare against all case values
+    for (SwitchCase c in node.cases) {
+      for (Expression exp in c.expressions) {
+        if (exp is NullLiteral ||
+            exp is ConstantExpression && exp.constant is NullConstant) {
+          // Null already checked, skip
+        } else {
+          wrap(exp, valueType);
+          b.local_get(valueLocal);
+          translator.convertType(function, valueLocal.type, valueType);
+          compare();
+          b.br_if(switchLabels[c]!);
+        }
+      }
+    }
+    w.Label defaultLabel =
+        defaultCase != null ? switchLabels[defaultCase]! : doneLabel;
+    b.br(defaultLabel);
+
+    // Emit case bodies
+    for (SwitchCase c in node.cases) {
+      switchLabels.remove(c);
+      b.end();
+      c.body.accept(this);
+      b.br(doneLabel);
+    }
+    b.end();
+  }
+
   @override
-  void visitContinueSwitchStatement(ContinueSwitchStatement node) =>
-      defaultStatement(node);
+  void visitContinueSwitchStatement(ContinueSwitchStatement node) {
+    w.Label? label = switchLabels[node.target];
+    if (label != null) {
+      b.br(label);
+    } else {
+      throw "Not supported: Backward jump to switch case at ${node.location}";
+    }
+  }
+
   @override
   void visitYieldStatement(YieldStatement node) => defaultStatement(node);
 
