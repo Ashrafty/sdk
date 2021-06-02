@@ -201,7 +201,7 @@ class Intrinsifier {
         receiver.constant is ListConstant &&
         name == '[]') {
       ClassInfo info = translator.classInfo[translator.listBaseClass]!;
-      w.RefType listType = w.RefType.def(info.struct, nullable: true);
+      w.RefType listType = info.nullableType;
       Field arrayField = translator.listBaseClass.fields
           .firstWhere((f) => f.name.text == '_data');
       int arrayFieldIndex = translator.fieldIndex[arrayField]!;
@@ -214,7 +214,7 @@ class Intrinsifier {
       codeGen.wrap(node.arguments.positional.single, w.NumType.i64);
       b.i32_wrap_i64();
       b.array_get(arrayType);
-      return translator.nullableObjectType;
+      return translator.topInfo.nullableType;
     }
 
     if (node.arguments.positional.length == 1) {
@@ -274,16 +274,34 @@ class Intrinsifier {
   }
 
   w.ValueType? generateStaticIntrinsic(StaticInvocation node) {
-    if (node.target.enclosingLibrary == translator.coreTypes.coreLibrary &&
-        node.name.text == "identical") {
-      Expression first = node.arguments.positional[0];
-      Expression second = node.arguments.positional[1];
-      // TODO: Support non-reference types
-      w.ValueType object = translator.nullableObjectType;
-      codeGen.wrap(first, object);
-      codeGen.wrap(second, object);
-      b.ref_eq();
-      return w.NumType.i32;
+    if (node.target.enclosingLibrary == translator.coreTypes.coreLibrary) {
+      switch (node.name.text) {
+        case "identical":
+          Expression first = node.arguments.positional[0];
+          Expression second = node.arguments.positional[1];
+          // TODO: Support non-reference types
+          w.ValueType object = translator.topInfo.nullableType;
+          codeGen.wrap(first, object);
+          codeGen.wrap(second, object);
+          b.ref_eq();
+          return w.NumType.i32;
+        case "_getHash":
+          Expression arg = node.arguments.positional[0];
+          w.ValueType objectType = translator.objectInfo.nullableType;
+          codeGen.wrap(arg, objectType);
+          b.struct_get(translator.objectInfo.struct, 1);
+          b.i64_extend_i32_u();
+          return w.NumType.i64;
+        case "_setHash":
+          Expression arg = node.arguments.positional[0];
+          Expression hash = node.arguments.positional[1];
+          w.ValueType objectType = translator.objectInfo.nullableType;
+          codeGen.wrap(arg, objectType);
+          codeGen.wrap(hash, w.NumType.i64);
+          b.i32_wrap_i64();
+          b.struct_set(translator.objectInfo.struct, 1);
+          return codeGen.voidMarker;
+      }
     }
 
     if (node.target.enclosingLibrary.name == "dart._internal") {
@@ -299,13 +317,14 @@ class Intrinsifier {
               translator.wasmArrayType(w.PackedType.i8, "WasmI8");
           Expression length = node.arguments.positional[0];
           b.i32_const(info.classId);
+          b.i32_const(initialIdentityHash);
           codeGen.wrap(length, w.NumType.i64);
           b.i32_wrap_i64();
           b.rtt_canon(arrayType);
           b.array_new_default_with_rtt(arrayType);
           b.global_get(info.rtt);
           b.struct_new_with_rtt(info.struct);
-          return w.RefType.def(info.struct, nullable: false);
+          return info.nonNullableType;
         case "writeIntoOneByteString":
           ClassInfo info = translator.classInfo[translator.oneByteStringClass]!;
           w.ArrayType arrayType =
@@ -316,7 +335,7 @@ class Intrinsifier {
           Expression string = node.arguments.positional[0];
           Expression index = node.arguments.positional[1];
           Expression codePoint = node.arguments.positional[2];
-          codeGen.wrap(string, w.RefType.def(info.struct, nullable: false));
+          codeGen.wrap(string, info.nonNullableType);
           b.struct_get(info.struct, arrayFieldIndex);
           codeGen.wrap(index, w.NumType.i64);
           b.i32_wrap_i64();
@@ -330,13 +349,14 @@ class Intrinsifier {
               translator.wasmArrayType(w.PackedType.i16, "WasmI16");
           Expression length = node.arguments.positional[0];
           b.i32_const(info.classId);
+          b.i32_const(initialIdentityHash);
           codeGen.wrap(length, w.NumType.i64);
           b.i32_wrap_i64();
           b.rtt_canon(arrayType);
           b.array_new_default_with_rtt(arrayType);
           b.global_get(info.rtt);
           b.struct_new_with_rtt(info.struct);
-          return w.RefType.def(info.struct, nullable: false);
+          return info.nonNullableType;
         case "writeIntoTwoByteString":
           ClassInfo info = translator.classInfo[translator.twoByteStringClass]!;
           w.ArrayType arrayType =
@@ -347,7 +367,7 @@ class Intrinsifier {
           Expression string = node.arguments.positional[0];
           Expression index = node.arguments.positional[1];
           Expression codePoint = node.arguments.positional[2];
-          codeGen.wrap(string, w.RefType.def(info.struct, nullable: false));
+          codeGen.wrap(string, info.nonNullableType);
           b.struct_get(info.struct, arrayFieldIndex);
           codeGen.wrap(index, w.NumType.i64);
           b.i32_wrap_i64();

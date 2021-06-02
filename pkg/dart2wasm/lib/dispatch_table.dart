@@ -108,19 +108,13 @@ class SelectorInfo {
     });
     List<w.ValueType> inputs = List.generate(
         inputSets.length,
-        (i) => translator.translateType(InterfaceType(
-            upperBound(inputSets[i]).cls,
-            inputNullable[i]
-                ? Nullability.nullable
-                : Nullability.nonNullable)));
+        (i) => translator.typeForInfo(
+            upperBound(inputSets[i]), inputNullable[i]) as w.ValueType);
     inputs[0] = translator.ensureBoxed(inputs[0]);
     List<w.ValueType> outputs = List.generate(
         outputSets.length,
-        (i) => translator.translateType(InterfaceType(
-            upperBound(outputSets[i]).cls,
-            outputNullable[i]
-                ? Nullability.nullable
-                : Nullability.nonNullable)));
+        (i) => translator.typeForInfo(
+            upperBound(outputSets[i]), outputNullable[i]) as w.ValueType);
     return translator.m.addFunctionType(inputs, outputs);
   }
 }
@@ -182,7 +176,8 @@ class DispatchTable {
         return selector;
       }
 
-      for (Member member in info.cls.members) {
+      for (Member member
+          in info.cls?.members ?? translator.coreTypes.objectClass.members) {
         if (member.isInstanceMember) {
           if (member is Field) {
             addMember(member.getterReference);
@@ -201,7 +196,7 @@ class DispatchTable {
     // Build lists of class IDs and count targets
     for (SelectorInfo selector in selectorInfo.values) {
       selector.classIds = selector.targets.keys
-          .where((id) => !translator.classes[id].cls.isAbstract)
+          .where((id) => !(translator.classes[id].cls?.isAbstract ?? true))
           .toList()
             ..sort();
       Set<Reference> targets =
@@ -217,8 +212,10 @@ class DispatchTable {
           ..sort((a, b) => b.sortWeight - a.sortWeight);
     int firstAvailable = 0;
     table = [];
+    bool first = true;
     for (SelectorInfo selector in selectors) {
-      int offset = firstAvailable - selector.classIds.first;
+      int offset = first ? 0 : firstAvailable - selector.classIds.first;
+      first = false;
       bool fits;
       do {
         fits = true;

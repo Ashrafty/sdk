@@ -44,5 +44,7 @@ import "dart:collection"
         UnmodifiableMapBase,
         UnmodifiableMapView;
 
+import 'dart:math' show Random;
+
 import "dart:typed_data"
     show Endian, Uint8List, Int64List, Uint16List, Uint32List;

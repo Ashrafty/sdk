@@ -45,13 +45,14 @@ class Constants {
         ((info.struct.fields.last.type as w.RefType).heapType as w.DefHeapType)
             .def as w.ArrayType;
 
-    w.RefType emptyStringType = w.RefType.def(info.struct, nullable: true);
+    w.RefType emptyStringType = info.nullableType;
     emptyString = m.addGlobal(w.GlobalType(emptyStringType));
     emptyString.initializer.ref_null(emptyStringType.heapType);
     emptyString.initializer.end();
 
     w.Instructions b = translator.initFunction.body;
     b.i32_const(info.classId);
+    b.i32_const(initialIdentityHash);
     b.i32_const(0);
     b.rtt_canon(arrayType);
     b.array_new_default_with_rtt(arrayType);
@@ -91,8 +92,7 @@ class Constants {
   w.DefinedFunction makeStringFunction(Class cls) {
     ClassInfo info = translator.classInfo[cls]!;
     w.FunctionType ftype = m.addFunctionType(
-        const [w.NumType.i32, w.NumType.i32],
-        [w.RefType.def(info.struct, nullable: false)]);
+        const [w.NumType.i32, w.NumType.i32], [info.nonNullableType]);
     return m.addFunction(ftype);
   }
 
@@ -135,6 +135,7 @@ class Constants {
     b.end();
 
     b.i32_const(info.classId);
+    b.i32_const(initialIdentityHash);
     b.local_get(array);
     b.global_get(info.rtt);
     b.struct_new_with_rtt(info.struct);
@@ -248,7 +249,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
     ClassInfo info = translator.classInfo[isOneByte
         ? translator.oneByteStringClass
         : translator.twoByteStringClass]!;
-    w.RefType type = w.RefType.def(info.struct, nullable: false);
+    w.RefType type = info.nonNullableType;
     instantiateLazyConstant(constant, type, (function) {
       StringBuffer buffer =
           isOneByte ? constants.oneByteStrings : constants.twoByteStrings;
@@ -269,22 +270,24 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
   @override
   w.ValueType visitInstanceConstant(InstanceConstant constant) {
     ClassInfo info = translator.classInfo[constant.classNode]!;
-    w.RefType type = w.RefType.def(info.struct, nullable: false);
+    w.RefType type = info.nonNullableType;
     instantiateLazyConstant(constant, type, (function) {
+      const int baseFieldCount = 2;
       int fieldCount = constant.fieldValues.length;
-      assert(info.struct.fields.length == 1 + fieldCount);
-      List<Constant?> subConstants = List.filled(1 + fieldCount, null);
+      assert(info.struct.fields.length == baseFieldCount + fieldCount);
+      List<Constant?> subConstants = List.filled(fieldCount, null);
       constant.fieldValues.forEach((reference, subConstant) {
-        int fieldIndex = translator.fieldIndex[reference.asField]!;
-        assert(subConstants[fieldIndex] == null);
-        subConstants[fieldIndex] = subConstant;
+        int index = translator.fieldIndex[reference.asField]! - baseFieldCount;
+        assert(subConstants[index] == null);
+        subConstants[index] = subConstant;
       });
 
       w.Instructions b = function.body;
       b.i32_const(info.classId);
-      for (int i = 1; i <= fieldCount; i++) {
-        constants.instantiateConstant(
-            function, subConstants[i]!, info.struct.fields[i].type.unpacked);
+      b.i32_const(initialIdentityHash);
+      for (int i = 0; i < fieldCount; i++) {
+        constants.instantiateConstant(function, subConstants[i]!,
+            info.struct.fields[baseFieldCount + i].type.unpacked);
       }
       b.global_get(info.rtt);
       b.struct_new_with_rtt(info.struct);
@@ -296,7 +299,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
   w.ValueType visitListConstant(ListConstant constant) {
     // TODO: Use unmodifiable list
     ClassInfo info = translator.classInfo[translator.fixedLengthListClass]!;
-    w.RefType type = w.RefType.def(info.struct, nullable: false);
+    w.RefType type = info.nonNullableType;
     instantiateLazyConstant(constant, type, (function) {
       w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
       w.ArrayType arrayType =
@@ -307,6 +310,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
           refType.withNullability(!translator.options.localNullability));
       w.Instructions b = function.body;
       b.i32_const(info.classId);
+      b.i32_const(initialIdentityHash);
       b.i64_const(length);
       b.i32_const(length);
       b.rtt_canon(arrayType);
@@ -343,6 +347,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
 
       w.Instructions b = function.body;
       b.i32_const(info.classId);
+      b.i32_const(initialIdentityHash);
       // TODO: Put dummy context in global variable
       b.rtt_canon(translator.dummyContext);
       b.struct_new_with_rtt(translator.dummyContext);

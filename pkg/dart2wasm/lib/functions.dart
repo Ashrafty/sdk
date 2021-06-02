@@ -92,11 +92,8 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
   }
 
   w.FunctionType visitConstructor(Constructor node, Reference target) {
-    return _makeFunctionType(
-        target,
-        VoidType(),
-        w.RefType.def(translator.classInfo[node.enclosingClass]!.struct,
-            nullable: false),
+    return _makeFunctionType(target, VoidType(),
+        translator.classInfo[node.enclosingClass]!.nonNullableType,
         getter: false);
   }
 

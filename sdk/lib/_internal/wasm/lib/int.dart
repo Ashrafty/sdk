@@ -532,8 +532,8 @@ class _BoxedInt implements int {
     int smi = this;
     do {
       // Two digits at a time.
-      final int twoDigits = unsafeCast<int>(smi.remainder(100));
-      smi = unsafeCast<int>(smi ~/ 100);
+      final int twoDigits = smi.remainder(100);
+      smi = smi ~/ 100;
       int digitIndex = twoDigits * 2;
       result._setAt(index, _digitTable[digitIndex + 1]);
       result._setAt(index - 1, _digitTable[digitIndex]);
@@ -543,12 +543,12 @@ class _BoxedInt implements int {
       // Character code for '0'.
       // Issue(https://dartbug.com/39639): The analyzer incorrectly reports the
       // result type as `num`.
-      result._setAt(index, unsafeCast<int>(DIGIT_ZERO + smi));
+      result._setAt(index, DIGIT_ZERO + smi);
     } else {
       // No remainder for this case.
       // Issue(https://dartbug.com/39639): The analyzer incorrectly reports the
       // result type as `num`.
-      int digitIndex = unsafeCast<int>(smi * 2);
+      int digitIndex = smi * 2;
       result._setAt(index, _digitTable[digitIndex + 1]);
       result._setAt(index - 1, _digitTable[digitIndex]);
     }

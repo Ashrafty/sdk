@@ -10,8 +10,10 @@ import 'package:kernel/ast.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+const int initialIdentityHash = 0;
+
 class ClassInfo {
-  Class cls;
+  Class? cls;
   int classId;
   int depth;
   w.StructType struct;
@@ -19,6 +21,9 @@ class ClassInfo {
   ClassInfo? superInfo;
   late ClassInfo repr;
   List<ClassInfo> implementedBy = [];
+
+  late w.RefType nullableType = w.RefType.def(struct, nullable: true);
+  late w.RefType nonNullableType = w.RefType.def(struct, nullable: false);
 
   ClassInfo(this.cls, this.classId, this.depth, this.struct, this.rtt) {
     implementedBy.add(this);
@@ -50,6 +55,7 @@ class ClassInfoCollector {
   Translator translator;
   w.Module m;
   int nextClassId = 0;
+  late ClassInfo topInfo;
 
   ClassInfoCollector(this.translator) : m = translator.m;
 
@@ -69,23 +75,41 @@ class ClassInfoCollector {
     return rtt;
   }
 
+  void initializeTop() {
+    final w.StructType struct = m.addStructType("#Top");
+    final w.DefinedGlobal rtt = makeRtt(m, struct, null);
+    topInfo = ClassInfo(null, nextClassId++, 0, struct, rtt);
+    translator.classes.add(topInfo);
+    translator.classForHeapType[w.HeapType.def(struct)] = topInfo;
+  }
+
   void initialize(Class cls) {
     ClassInfo? info = translator.classInfo[cls];
     if (info == null) {
       Class? superclass = cls.superclass;
       if (superclass == null) {
+        ClassInfo superInfo = topInfo;
         final w.StructType struct = m.addStructType(cls.name);
-        final w.DefinedGlobal rtt = makeRtt(m, struct, null);
-        info = ClassInfo(cls, nextClassId++, 0, struct, rtt);
-        translator.nonNullableObjectType =
-            w.RefType.def(struct, nullable: false);
-        translator.nullableObjectType = w.RefType.def(struct, nullable: true);
+        final w.DefinedGlobal rtt = makeRtt(m, struct, superInfo);
+        info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt);
+        info.superInfo = superInfo;
+        // Mark Top type as implementing Object to force the representation
+        // type of Object to be Top.
+        info.implementedBy.add(topInfo);
       } else {
         initialize(superclass);
         for (Supertype interface in cls.implementedTypes) {
           initialize(interface.classNode);
         }
-        ClassInfo superInfo = translator.classInfo[superclass]!;
+        // In the Wasm type hierarchy, Object, bool and num sit directly under
+        // the Top type, and the box classes sit under their corresponding
+        // unboxed types. All other classes sit below their superclass.
+        ClassInfo superInfo = cls == translator.coreTypes.boolClass ||
+                cls == translator.coreTypes.numClass
+            ? topInfo
+            : translator.boxedClasses.values.contains(cls)
+                ? translator.classInfo[cls.implementedTypes.single.classNode]!
+                : translator.classInfo[superclass]!;
         w.StructType struct =
             cls.fields.where((f) => f.isInstanceMember).isEmpty
                 ? superInfo.struct
@@ -111,28 +135,33 @@ class ClassInfoCollector {
   void generateFields(ClassInfo info) {
     ClassInfo? superInfo = info.superInfo;
     if (superInfo == null) {
-      // Object - add class id field
+      // Top - add class id field
       info.struct.fields.add(w.FieldType(w.NumType.i32));
     } else if (info.struct != superInfo.struct) {
       // Copy fields from superclass
       for (w.FieldType fieldType in superInfo.struct.fields) {
         info.struct.fields.add(fieldType);
       }
-    }
-    for (Field field in info.cls.fields) {
-      if (field.isInstanceMember) {
-        w.ValueType wasmType = translator.translateType(field.type);
-        // TODO: Generalize this check for finer control
-        if (wasmType != w.RefType.data()) {
-          wasmType = wasmType.withNullability(true);
+      if (info.cls!.superclass == null) {
+        // Object - add identity hash code field
+        info.struct.fields.add(w.FieldType(w.NumType.i32));
+      }
+      for (Field field in info.cls!.fields) {
+        if (field.isInstanceMember) {
+          w.ValueType wasmType = translator.translateType(field.type);
+          // TODO: Generalize this check for finer control
+          if (wasmType != w.RefType.data()) {
+            wasmType = wasmType.withNullability(true);
+          }
+          translator.fieldIndex[field] = info.struct.fields.length;
+          info.struct.fields.add(w.FieldType(wasmType));
         }
-        translator.fieldIndex[field] = info.struct.fields.length;
-        info.struct.fields.add(w.FieldType(wasmType));
       }
     }
   }
 
   void collect() {
+    initializeTop();
     for (Library library in translator.component.libraries) {
       for (Class cls in library.classes) {
         initialize(cls);

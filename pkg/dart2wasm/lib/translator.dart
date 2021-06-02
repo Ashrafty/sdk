@@ -47,9 +47,6 @@ class Translator {
   ClosedWorldClassHierarchy hierarchy;
   late ClassHierarchySubtypes subtypes;
 
-  late final w.RefType nonNullableObjectType;
-  late final w.RefType nullableObjectType;
-
   late final Class wasmTypesBaseClass;
   late final Class wasmArrayBaseClass;
   late final Class wasmDataRefClass;
@@ -92,6 +89,9 @@ class Translator {
   Map<int, w.DefinedGlobal> functionTypeRtt = {};
   Map<w.DefinedFunction, w.DefinedGlobal> functionRefCache = {};
   Map<Procedure, w.DefinedFunction> tearOffFunctionCache = {};
+
+  ClassInfo get topInfo => classes[0];
+  ClassInfo get objectInfo => classInfo[coreTypes.objectClass]!;
 
   Translator(this.component, this.coreTypes, this.typeEnvironment,
       this.tableSelectorAssigner, this.options)
@@ -268,40 +268,46 @@ class Translator {
     throw "Non-value types only allowed in arrays and fields";
   }
 
-  bool isWasmType(DartType type) {
-    return type is InterfaceType &&
-        (type.classNode.superclass == wasmTypesBaseClass ||
-            type.classNode.superclass?.superclass == wasmTypesBaseClass);
+  bool isWasmType(Class cls) {
+    return cls.superclass == wasmTypesBaseClass ||
+        cls.superclass?.superclass == wasmTypesBaseClass;
+  }
+
+  w.StorageType typeForInfo(ClassInfo info, bool nullable) {
+    Class? cls = info.cls;
+    if (cls != null) {
+      w.StorageType? builtin = builtinTypes[cls];
+      if (builtin != null) {
+        if (!nullable) return builtin;
+        if (isWasmType(cls)) throw "Wasm numeric types can't be nullable";
+        Class? boxedClass = boxedClasses[builtin];
+        if (boxedClass != null) {
+          info = classInfo[boxedClass]!;
+        }
+      }
+    }
+    return w.RefType.def(info.repr.struct,
+        nullable: !options.parameterNullability || nullable);
   }
 
   w.StorageType translateStorageType(DartType type) {
     assert(type is! VoidType);
     if (type is InterfaceType) {
-      w.StorageType? builtin = builtinTypes[type.classNode];
-      if (builtin != null) {
-        if (!type.isPotentiallyNullable) return builtin;
-        if (isWasmType(type)) throw "Wasm numeric types can't be nullable";
-        Class? boxedClass = boxedClasses[builtin];
-        if (boxedClass != null) {
-          type = InterfaceType(boxedClass, type.nullability);
-        }
-      }
       if (type.classNode.superclass == wasmArrayBaseClass) {
         DartType elementType = type.typeArguments.single;
         return w.RefType.def(arrayType(elementType), nullable: false);
       }
-      return w.RefType.def(classInfo[type.classNode]!.repr.struct,
-          nullable:
-              !options.parameterNullability || type.isPotentiallyNullable);
+      return typeForInfo(
+          classInfo[type.classNode]!, type.isPotentiallyNullable);
     }
     if (type is DynamicType) {
-      return nullableObjectType;
+      return topInfo.nullableType;
     }
     if (type is NullType) {
-      return nullableObjectType;
+      return topInfo.nullableType;
     }
     if (type is NeverType) {
-      return nullableObjectType;
+      return topInfo.nullableType;
     }
     if (type is VoidType) {
       return voidMarker;
@@ -310,7 +316,7 @@ class Translator {
       return translateStorageType(type.bound);
     }
     if (type is FutureOrType) {
-      return nullableObjectType;
+      return topInfo.nullableType;
     }
     if (type is FunctionType) {
       if (type.requiredParameterCount != type.positionalParameters.length ||
@@ -353,9 +359,9 @@ class Translator {
   w.FunctionType functionType(int parameterCount) {
     return m.addFunctionType([
       w.RefType.data(),
-      ...List<w.ValueType>.filled(parameterCount, nullableObjectType)
+      ...List<w.ValueType>.filled(parameterCount, topInfo.nullableType)
     ], [
-      nullableObjectType
+      topInfo.nullableType
     ]);
   }
 
