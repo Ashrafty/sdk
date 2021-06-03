@@ -51,6 +51,7 @@ class Intrinsifier {
         '^': {intType: (b) => b.i64_xor()},
         '<<': {intType: (b) => b.i64_shl()},
         '>>': {intType: (b) => b.i64_shr_s()},
+        '>>>': {intType: (b) => b.i64_shr_u()},
         '<': {intType: (b) => b.i64_lt_s()},
         '<=': {intType: (b) => b.i64_le_s()},
         '>': {intType: (b) => b.i64_gt_s()},
