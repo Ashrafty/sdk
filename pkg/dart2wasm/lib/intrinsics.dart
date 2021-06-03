@@ -89,7 +89,7 @@ class Intrinsifier {
         },
         'toInt': (b) {
           b.i64_trunc_sat_f64_s();
-        }
+        },
       },
     };
 
@@ -376,6 +376,14 @@ class Intrinsifier {
           b.i32_wrap_i64();
           b.array_set(arrayType);
           return codeGen.voidMarker;
+        case "doubleToIntBits":
+          codeGen.wrap(node.arguments.positional.single, w.NumType.f64);
+          b.i64_reinterpret_f64();
+          return w.NumType.i64;
+        case "intBitsToDouble":
+          codeGen.wrap(node.arguments.positional.single, w.NumType.i64);
+          b.f64_reinterpret_i64();
+          return w.NumType.f64;
       }
     }
 

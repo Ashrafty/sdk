@@ -193,6 +193,7 @@
           "_internal/wasm/lib/array.dart",
           "_internal/wasm/lib/array_patch.dart",
           "_internal/wasm/lib/bool.dart",
+          "_internal/wasm/lib/bool_patch.dart",
           "_internal/wasm/lib/date_patch.dart",
           "_internal/wasm/lib/double.dart",
           "_internal/wasm/lib/expando_patch.dart",

@@ -7,7 +7,7 @@
 /// by patches of that library. We plan to change this when we have a shared
 /// front end and simply use parts.
 
-import "dart:_internal" show patch;
+import "dart:_internal" show mix64, patch;
 
 import "dart:typed_data" show Uint32List;
 
@@ -262,20 +262,7 @@ class _Random implements Random {
   // Use a singleton Random object to get a new seed if no seed was passed.
   static final _prng = new _Random._withState(_initialSeed());
 
-  static int _setupSeed(int seed) {
-    int n = seed;
-    // Thomas Wang 64-bit mix.
-    // http://www.concentric.net/~Ttwang/tech/inthash.htm
-    // via. http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm
-    n = (~n) + (n << 21); // n = (n << 21) - n - 1;
-    n = n ^ (n >>> 24);
-    n = n * 265; // n = (n + (n << 3)) + (n << 8);
-    n = n ^ (n >>> 14);
-    n = n * 21; // n = (n + (n << 2)) + (n << 4);
-    n = n ^ (n >>> 28);
-    n = n + (n << 31);
-    return n;
-  }
+  static int _setupSeed(int seed) => mix64(seed);
 
   // TODO: Make this actually random
   static int _initialSeed() => 0xCAFEBABEDEADBEEF;

@@ -10,8 +10,8 @@ class _BoxedDouble implements double {
   @pragma("wasm:entry-point")
   double value = 0.0;
 
-  int get hashCode native "Double_hashCode";
-  int get _identityHashCode native "Double_hashCode";
+  int get hashCode => mix64(doubleToIntBits(this));
+  int get _identityHashCode => hashCode;
 
   double operator +(num other) {
     return _add(other.toDouble());

@@ -62,3 +62,20 @@ class Lists {
 //
 // Important: this is unsafe and must be used with care.
 T unsafeCast<T>(Object? v) native "Internal_unsafeCast";
+
+// Thomas Wang 64-bit mix.
+// http://www.concentric.net/~Ttwang/tech/inthash.htm
+// via. http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm
+int mix64(int n) {
+  n = (~n) + (n << 21); // n = (n << 21) - n - 1;
+  n = n ^ (n >>> 24);
+  n = n * 265; // n = (n + (n << 3)) + (n << 8);
+  n = n ^ (n >>> 14);
+  n = n * 21; // n = (n + (n << 2)) + (n << 4);
+  n = n ^ (n >>> 28);
+  n = n + (n << 31);
+  return n;
+}
+
+int doubleToIntBits(double value) native;
+double intBitsToDouble(int value) native;
