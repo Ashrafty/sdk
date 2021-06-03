@@ -9,4 +9,4 @@ bool identical(Object? a, Object? b) native "Identical_comparison";
 
 @patch
 int identityHashCode(Object? object) =>
-    object == null ? 2011 : object._identityHashCode;
+    object == null ? Null._HASH_CODE : object._identityHashCode;

@@ -50,8 +50,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   w.ValueType typeForLocal(w.ValueType type) => translator.typeForLocal(type);
 
-  void _unimplemented(TreeNode node) {
-    final text = "Not implemented: ${node.runtimeType} at ${node.location}";
+  void _unimplemented(TreeNode node, Object message) {
+    final text = "Not implemented: $message at ${node.location}";
     print(text);
     b.comment(text);
     b.unreachable();
@@ -59,18 +59,18 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   void defaultInitializer(Initializer node) {
-    _unimplemented(node);
+    _unimplemented(node, node.runtimeType);
   }
 
   @override
   w.ValueType defaultExpression(Expression node, w.ValueType expectedType) {
-    _unimplemented(node);
+    _unimplemented(node, node.runtimeType);
     return expectedType;
   }
 
   @override
   void defaultStatement(Statement node) {
-    _unimplemented(node);
+    _unimplemented(node, node.runtimeType);
   }
 
   void generate(Reference reference, w.DefinedFunction function,
@@ -846,6 +846,28 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     w.ValueType? intrinsicResult = intrinsifier.generateInstanceIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
     Procedure target = node.interfaceTarget;
+    if (node.kind == InstanceAccessKind.Object) {
+      switch (target.name.text) {
+        case "toString":
+          late w.Label done;
+          w.ValueType resultType = _virtualCall(node, target, (signature) {
+            done = b.block([], signature.outputs);
+            w.Label nullString = b.block();
+            wrap(node.receiver, translator.topInfo.nullableType);
+            b.br_on_null(nullString);
+          }, (_) {
+            _visitArguments(node.arguments, node.interfaceTargetReference, 1);
+          }, getter: false, setter: false);
+          b.br(done);
+          b.end();
+          wrap(StringLiteral("null"), resultType);
+          b.end();
+          return resultType;
+        default:
+          _unimplemented(node, "Nullable invocation of ${target.name.text}");
+          break;
+      }
+    }
     Member? singleTarget = translator.singleTarget(node);
     if (singleTarget != null) {
       w.BaseFunction targetFunction =
@@ -956,6 +978,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         : translator.tableSelectorAssigner
             .methodOrSetterSelectorId(interfaceTarget);
     SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
+    assert(selector.name == interfaceTarget.name.text);
 
     pushReceiver(selector.signature);
 
@@ -1186,12 +1209,33 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   w.ValueType visitInstanceGet(InstanceGet node, w.ValueType expectedType) {
+    Member target = node.interfaceTarget;
+    if (node.kind == InstanceAccessKind.Object) {
+      switch (target.name.text) {
+        case "hashCode":
+          late w.Label done;
+          w.ValueType resultType = _virtualCall(node, target, (signature) {
+            done = b.block([], signature.outputs);
+            w.Label nullHash = b.block();
+            wrap(node.receiver, translator.topInfo.nullableType);
+            b.br_on_null(nullHash);
+          }, (_) {}, getter: true, setter: false);
+          b.br(done);
+          b.end();
+          b.i64_const(2011);
+          b.end();
+          return resultType;
+        default:
+          _unimplemented(node, "Nullable get of ${target.name.text}");
+          break;
+      }
+    }
     Member? singleTarget = translator.singleTarget(node);
     if (singleTarget != null) {
       return _directGet(singleTarget, node.receiver,
           () => intrinsifier.generateInstanceGetterIntrinsic(node));
     } else {
-      return _virtualCall(node, node.interfaceTarget,
+      return _virtualCall(node, target,
           (signature) => wrap(node.receiver, signature.inputs.first), (_) {},
           getter: true, setter: false);
     }

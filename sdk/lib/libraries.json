@@ -203,6 +203,7 @@
           "_internal/wasm/lib/immutable_map.dart",
           "_internal/wasm/lib/int.dart",
           "_internal/wasm/lib/integers_patch.dart",
+          "_internal/wasm/lib/null_patch.dart",
           "_internal/wasm/lib/map_patch.dart",
           "_internal/wasm/lib/object_patch.dart",
           "_internal/wasm/lib/string_patch.dart"
