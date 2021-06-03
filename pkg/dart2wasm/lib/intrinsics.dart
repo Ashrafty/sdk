@@ -280,12 +280,28 @@ class Intrinsifier {
         case "identical":
           Expression first = node.arguments.positional[0];
           Expression second = node.arguments.positional[1];
-          // TODO: Support non-reference types
-          w.ValueType object = translator.topInfo.nullableType;
-          codeGen.wrap(first, object);
-          codeGen.wrap(second, object);
-          b.ref_eq();
-          return w.NumType.i32;
+          DartType boolType = translator.coreTypes.boolNonNullableRawType;
+          InterfaceType intType = translator.coreTypes.intNonNullableRawType;
+          DartType doubleType = translator.coreTypes.doubleNonNullableRawType;
+          List<DartType> types = [dartTypeOf(first), dartTypeOf(second)];
+          if (types.every((t) => t == intType)) {
+            codeGen.wrap(first, w.NumType.i64);
+            codeGen.wrap(second, w.NumType.i64);
+            b.i64_eq();
+            return w.NumType.i32;
+          }
+          if (types.every((t) =>
+              t is InterfaceType &&
+              t != boolType &&
+              t != doubleType &&
+              !translator.hierarchy
+                  .isSubtypeOf(intType.classNode, t.classNode))) {
+            codeGen.wrap(first, w.RefType.eq(nullable: true));
+            codeGen.wrap(second, w.RefType.eq(nullable: true));
+            b.ref_eq();
+            return w.NumType.i32;
+          }
+          break;
         case "_getHash":
           Expression arg = node.arguments.positional[0];
           w.ValueType objectType = translator.objectInfo.nullableType;
@@ -408,6 +424,92 @@ class Intrinsifier {
       b.local_get(paramLocals[0]);
       b.local_get(paramLocals[1]);
       b.ref_eq();
+      return true;
+    }
+
+    if (member == translator.coreTypes.identicalProcedure) {
+      w.Local first = paramLocals[0];
+      w.Local second = paramLocals[1];
+      ClassInfo boolInfo = translator.classInfo[translator.boxedBoolClass]!;
+      ClassInfo intInfo = translator.classInfo[translator.boxedIntClass]!;
+      ClassInfo doubleInfo = translator.classInfo[translator.boxedDoubleClass]!;
+      w.Local cid = function.addLocal(w.NumType.i32);
+      w.Label ref_eq = b.block();
+      b.local_get(first);
+      b.br_on_null(ref_eq);
+      b.struct_get(translator.topInfo.struct, 0);
+      b.local_tee(cid);
+
+      // Both bool?
+      b.i32_const(boolInfo.classId);
+      b.i32_eq();
+      b.if_();
+      b.local_get(first);
+      b.global_get(boolInfo.rtt);
+      b.ref_cast();
+      b.struct_get(boolInfo.struct, 1);
+      w.Label bothBool = b.block([], [boolInfo.nullableType]);
+      b.local_get(second);
+      b.global_get(boolInfo.rtt);
+      b.br_on_cast(bothBool);
+      b.i32_const(0);
+      b.return_();
+      b.end();
+      b.struct_get(boolInfo.struct, 1);
+      b.i32_eq();
+      b.return_();
+      b.end();
+
+      // Both int?
+      b.local_get(cid);
+      b.i32_const(intInfo.classId);
+      b.i32_eq();
+      b.if_();
+      b.local_get(first);
+      b.global_get(intInfo.rtt);
+      b.ref_cast();
+      b.struct_get(intInfo.struct, 1);
+      w.Label bothInt = b.block([], [intInfo.nullableType]);
+      b.local_get(second);
+      b.global_get(intInfo.rtt);
+      b.br_on_cast(bothInt);
+      b.i32_const(0);
+      b.return_();
+      b.end();
+      b.struct_get(intInfo.struct, 1);
+      b.i64_eq();
+      b.return_();
+      b.end();
+
+      // Both double?
+      b.local_get(cid);
+      b.i32_const(doubleInfo.classId);
+      b.i32_eq();
+      b.if_();
+      b.local_get(first);
+      b.global_get(doubleInfo.rtt);
+      b.ref_cast();
+      b.struct_get(doubleInfo.struct, 1);
+      b.i64_reinterpret_f64();
+      w.Label bothDouble = b.block([], [doubleInfo.nullableType]);
+      b.local_get(second);
+      b.global_get(doubleInfo.rtt);
+      b.br_on_cast(bothDouble);
+      b.i32_const(0);
+      b.return_();
+      b.end();
+      b.struct_get(doubleInfo.struct, 1);
+      b.i64_reinterpret_f64();
+      b.i64_eq();
+      b.return_();
+      b.end();
+
+      // Compare as references
+      b.end();
+      b.local_get(first);
+      b.local_get(second);
+      b.ref_eq();
+
       return true;
     }
 
