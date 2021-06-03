@@ -88,11 +88,21 @@ abstract class _StringBase implements String {
 
   _StringBase._();
 
-  int get hashCode;
+  int get hashCode {
+    int hash = _getHash(this);
+    if (hash != 0) return hash;
+    hash = _computeHashCode();
+    _setHash(this, hash);
+    return hash;
+  }
+
+  int _computeHashCode();
+
+  int get _identityHashCode => hashCode;
 
   bool get _isOneByte {
     // Alternatively return false and override it on one-byte string classes.
-    return this is _OneByteString || this is _ExternalOneByteString;
+    return this is _OneByteString;
   }
 
   /**
@@ -914,6 +924,21 @@ abstract class _StringBase implements String {
   }
 
   int _copyIntoTwoByteString(_TwoByteString result, int offset);
+
+  static int _combineHashes(int hash, int other_hash) {
+    hash += other_hash;
+    hash += hash << 10;
+    hash ^= (hash & 0xFFFFFFFF) >>> 6;
+    return hash;
+  }
+
+  static int _finalizeHash(int hash) {
+    hash += hash << 3;
+    hash ^= (hash & 0xFFFFFFFF) >>> 11;
+    hash += hash << 15;
+    hash &= 0x3FFFFFFF;
+    return hash == 0 ? 1 : hash;
+  }
 }
 
 @pragma("wasm:entry-point")
@@ -925,8 +950,16 @@ class _OneByteString extends _StringBase {
       : _array = WasmIntArray<WasmI8>(length),
         super._();
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  int get hashCode native "String_getHashCode";
+  // Same hash as VM
+  int _computeHashCode() {
+    WasmIntArray<WasmI8> array = _array;
+    int length = array.length;
+    int hash = 0;
+    for (int i = 0; i < length; i++) {
+      hash = _StringBase._combineHashes(hash, array.readUnsigned(i));
+    }
+    return _StringBase._finalizeHash(hash);
+  }
 
   int codeUnitAt(int index) => _array.readUnsigned(index);
 
@@ -1206,7 +1239,6 @@ class _OneByteString extends _StringBase {
   }
 
   // Should be optimizable to a memory move.
-  // Accepts both _OneByteString and _ExternalOneByteString as argument.
   // Returns index after last character written.
   int _setRange(int index, String oneByteString, int start, int end) {
     assert(oneByteString._isOneByte);
@@ -1231,6 +1263,17 @@ class _TwoByteString extends _StringBase {
   _TwoByteString._withLength(int length)
       : _array = WasmIntArray<WasmI16>(length),
         super._();
+
+  // Same hash as VM
+  int _computeHashCode() {
+    WasmIntArray<WasmI16> array = _array;
+    int length = array.length;
+    int hash = 0;
+    for (int i = 0; i < length; i++) {
+      hash = _StringBase._combineHashes(hash, array.readUnsigned(i));
+    }
+    return _StringBase._finalizeHash(hash);
+  }
 
   // Allocates a string of given length, expecting its content to be
   // set using _setAt.
@@ -1273,42 +1316,6 @@ class _TwoByteString extends _StringBase {
       to.write(j++, from.readUnsigned(i));
     }
     return j;
-  }
-}
-
-@pragma("vm:entry-point")
-abstract class _ExternalOneByteString extends _StringBase {
-  factory _ExternalOneByteString._uninstantiable() {
-    throw "Unreachable";
-  }
-
-  bool _isWhitespace(int codeUnit) {
-    return _StringBase._isOneByteWhitespace(codeUnit);
-  }
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  int codeUnitAt(int index) native "String_codeUnitAt";
-
-  bool operator ==(Object other) {
-    return super == other;
-  }
-}
-
-@pragma("vm:entry-point")
-abstract class _ExternalTwoByteString extends _StringBase {
-  factory _ExternalTwoByteString._uninstantiable() {
-    throw "Unreachable";
-  }
-
-  bool _isWhitespace(int codeUnit) {
-    return _StringBase._isTwoByteWhitespace(codeUnit);
-  }
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  int codeUnitAt(int index) native "String_codeUnitAt";
-
-  bool operator ==(Object other) {
-    return super == other;
   }
 }
 
