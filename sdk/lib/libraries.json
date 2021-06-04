@@ -206,6 +206,7 @@
           "_internal/wasm/lib/null_patch.dart",
           "_internal/wasm/lib/map_patch.dart",
           "_internal/wasm/lib/object_patch.dart",
+          "_internal/wasm/lib/string_buffer_patch.dart",
           "_internal/wasm/lib/string_patch.dart"
         ]
       },

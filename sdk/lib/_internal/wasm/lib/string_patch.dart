@@ -1283,8 +1283,15 @@ class _TwoByteString extends _StringBase {
     return unsafeCast<_TwoByteString>(allocateTwoByteString(length));
   }
 
-  static String _allocateFromTwoByteList(List<int> list, int start, int end)
-      native "TwoByteString_allocateFromTwoByteList";
+  static String _allocateFromTwoByteList(List<int> list, int start, int end) {
+    final int length = end - start;
+    final s = _allocate(length);
+    final array = s._array;
+    for (int i = 0; i < length; i++) {
+      array.write(i, list[start + i]);
+    }
+    return s;
+  }
 
   // This is internal helper method. Code point value must be a valid
   // UTF-16 value (0..0xFFFF), index must be valid.
