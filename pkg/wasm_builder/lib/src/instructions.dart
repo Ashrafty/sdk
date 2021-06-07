@@ -63,6 +63,7 @@ class Instructions with SerializerMixin {
   final List<Local> locals;
 
   bool traceEnabled = true;
+  int lineNumberWidth = 7;
   int instructionColumnWidth = 50;
   int _indent = 0;
   List<String> _traceLines = [];
@@ -86,12 +87,13 @@ class Instructions with SerializerMixin {
       int indentAfter = 0}) {
     if (traceEnabled && trace != null) {
       _indent += indentBefore;
+      String byteOffset = "${data.length}  ".padLeft(lineNumberWidth + 2);
       String instr = "  " * _indent + trace.join(" ");
       instr = instr.length > instructionColumnWidth - 2
           ? instr.substring(0, instructionColumnWidth - 4) + "... "
           : instr.padRight(instructionColumnWidth);
       final String stack = reachableAfter ? _stackTypes.join(', ') : "-";
-      final String line = "$instr$stack\n";
+      final String line = "$byteOffset$instr$stack\n";
       _indent += indentAfter;
 
       _traceLines.add(line);
@@ -101,7 +103,8 @@ class Instructions with SerializerMixin {
 
   bool _comment(String text) {
     if (traceEnabled) {
-      final String line = "  " * _indent + ";; $text\n";
+      final String line =
+          " " * (lineNumberWidth + 2) + "  " * _indent + ";; $text\n";
       _traceLines.add(line);
     }
     return true;
@@ -243,6 +246,7 @@ class Instructions with SerializerMixin {
     label.baseStackHeight = _stackTypes.length - label.inputs.length;
     label.reachable = reachable;
     labelStack.add(label);
+    assert(_verifyStartOfBlock(label, trace: trace));
     writeByte(encoding);
     if (label.inputs.isEmpty && label.outputs.isEmpty) {
       writeByte(0x40);
@@ -252,7 +256,6 @@ class Instructions with SerializerMixin {
       final type = module.addFunctionType(label.inputs, label.outputs);
       writeSigned(type.index);
     }
-    assert(_verifyStartOfBlock(label, trace: trace));
     return label;
   }
 
@@ -278,9 +281,11 @@ class Instructions with SerializerMixin {
     final If label = _topOfLabelStack as If;
     assert(!label.hasElse || _reportError("Duplicate 'else' in 'if' block"));
     assert(_verifyEndOfBlock(label.inputs,
-        trace: const ['else'], reachableAfter: true, reindent: true));
+        trace: const ['else'],
+        reachableAfter: _topOfLabelStack.reachable,
+        reindent: true));
     label.hasElse = true;
-    reachable = true;
+    reachable = _topOfLabelStack.reachable;
     writeByte(0x05);
   }
 
