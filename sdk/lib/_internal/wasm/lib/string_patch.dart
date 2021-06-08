@@ -977,11 +977,27 @@ class _OneByteString extends _StringBase {
 
   @pragma("vm:recognized", "asm-intrinsic")
   @pragma("vm:exact-result-type", _OneByteString)
-  String _substringUncheckedNative(int startIndex, int endIndex)
-      native "OneByteString_substringUnchecked";
+  String _substringUncheckedNative(int startIndex, int endIndex) {
+    int length = endIndex - startIndex;
+    var result = _OneByteString._withLength(length);
+    for (int i = 0; i < length; i++) {
+      result._setAt(i, codeUnitAt(startIndex + i));
+    }
+    return result;
+  }
 
-  List<String> _splitWithCharCode(int charCode)
-      native "OneByteString_splitWithCharCode";
+  List<String> _splitWithCharCode(int charCode) {
+    List<String> result = [];
+    int start = 0;
+    for (int i = 0; i < length; i++) {
+      if (codeUnitAt(i) == charCode) {
+        result.add(_substringUnchecked(start, i));
+        start = i + 1;
+      }
+    }
+    result.add(_substringUnchecked(start, length));
+    return result;
+  }
 
   List<String> split(Pattern pattern) {
     if (pattern is _OneByteString && pattern.length == 1) {
