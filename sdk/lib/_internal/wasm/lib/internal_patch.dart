@@ -77,5 +77,7 @@ int mix64(int n) {
   return n;
 }
 
+int floatToIntBits(double value) native;
+double intBitsToFloat(int value) native;
 int doubleToIntBits(double value) native;
 double intBitsToDouble(int value) native;

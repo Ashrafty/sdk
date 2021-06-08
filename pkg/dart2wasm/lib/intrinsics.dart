@@ -408,6 +408,18 @@ class Intrinsifier {
           b.i32_wrap_i64();
           b.array_set(arrayType);
           return codeGen.voidMarker;
+        case "floatToIntBits":
+          codeGen.wrap(node.arguments.positional.single, w.NumType.f64);
+          b.f32_demote_f64();
+          b.i32_reinterpret_f32();
+          b.i64_extend_i32_u();
+          return w.NumType.i64;
+        case "intBitsToFloat":
+          codeGen.wrap(node.arguments.positional.single, w.NumType.i64);
+          b.i32_wrap_i64();
+          b.f32_reinterpret_i32();
+          b.f64_promote_f32();
+          return w.NumType.f64;
         case "doubleToIntBits":
           codeGen.wrap(node.arguments.positional.single, w.NumType.f64);
           b.i64_reinterpret_f64();

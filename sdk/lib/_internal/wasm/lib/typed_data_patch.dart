@@ -10,8 +10,12 @@
 import "dart:_internal"
     show
         CodeUnits,
+        doubleToIntBits,
         ExpandIterable,
+        floatToIntBits,
         FollowedByIterable,
+        intBitsToDouble,
+        intBitsToFloat,
         IterableElementError,
         ListMapView,
         Lists,
@@ -2196,12 +2200,170 @@ class _Uint8List extends _TypedList
     return new Uint8List(length);
   }
 
+  @override
+  int _getInt8(int index) {
+    return _array.readSigned(index);
+  }
+
+  @override
   int _getUint8(int index) {
     return _array.readUnsigned(index);
   }
 
+  @override
+  void _setInt8(int index, int value) {
+    _array.write(index, value);
+  }
+
+  @override
   void _setUint8(int index, int value) {
     _array.write(index, value);
+  }
+
+  @override
+  int _getInt16(int index) {
+    return _array.readUnsigned(index) | _array.readSigned(index + 1) << 8;
+  }
+
+  @override
+  int _getUint16(int index) {
+    return _array.readUnsigned(index) | _array.readUnsigned(index + 1) << 8;
+  }
+
+  @override
+  void _setInt16(int index, int value) {
+    _array.write(index, value);
+    _array.write(index + 1, value >> 8);
+  }
+
+  @override
+  void _setUint16(int index, int value) {
+    _array.write(index, value);
+    _array.write(index + 1, value >> 8);
+  }
+
+  @override
+  int _getInt32(int index) {
+    return _array.readUnsigned(index) |
+        _array.readUnsigned(index + 1) << 8 |
+        _array.readUnsigned(index + 2) << 16 |
+        _array.readSigned(index + 3) << 24;
+  }
+
+  @override
+  int _getUint32(int index) {
+    return _array.readUnsigned(index) |
+        _array.readUnsigned(index + 1) << 8 |
+        _array.readUnsigned(index + 2) << 16 |
+        _array.readUnsigned(index + 3) << 24;
+  }
+
+  @override
+  void _setInt32(int index, int value) {
+    _array.write(index, value);
+    _array.write(index + 1, value >> 8);
+    _array.write(index + 2, value >> 16);
+    _array.write(index + 3, value >> 24);
+  }
+
+  @override
+  void _setUint32(int index, int value) {
+    _array.write(index, value);
+    _array.write(index + 1, value >> 8);
+    _array.write(index + 2, value >> 16);
+    _array.write(index + 3, value >> 24);
+  }
+
+  @override
+  int _getInt64(int index) {
+    return _array.readUnsigned(index) |
+        _array.readUnsigned(index + 1) << 8 |
+        _array.readUnsigned(index + 2) << 16 |
+        _array.readUnsigned(index + 3) << 24 |
+        _array.readUnsigned(index + 4) << 32 |
+        _array.readUnsigned(index + 5) << 40 |
+        _array.readUnsigned(index + 6) << 48 |
+        _array.readSigned(index + 7) << 56;
+  }
+
+  @override
+  int _getUint64(int index) {
+    return _array.readUnsigned(index) |
+        _array.readUnsigned(index + 1) << 8 |
+        _array.readUnsigned(index + 2) << 16 |
+        _array.readUnsigned(index + 3) << 24 |
+        _array.readUnsigned(index + 4) << 32 |
+        _array.readUnsigned(index + 5) << 40 |
+        _array.readUnsigned(index + 6) << 48 |
+        _array.readUnsigned(index + 7) << 56;
+  }
+
+  @override
+  void _setInt64(int index, int value) {
+    _array.write(index, value);
+    _array.write(index + 1, value >> 8);
+    _array.write(index + 2, value >> 16);
+    _array.write(index + 3, value >> 24);
+    _array.write(index + 4, value >> 32);
+    _array.write(index + 5, value >> 40);
+    _array.write(index + 6, value >> 48);
+    _array.write(index + 7, value >> 56);
+  }
+
+  @override
+  void _setUint64(int index, int value) {
+    _array.write(index, value);
+    _array.write(index + 1, value >> 8);
+    _array.write(index + 2, value >> 16);
+    _array.write(index + 3, value >> 24);
+    _array.write(index + 4, value >> 32);
+    _array.write(index + 5, value >> 40);
+    _array.write(index + 6, value >> 48);
+    _array.write(index + 7, value >> 56);
+  }
+
+  @override
+  double _getFloat32(int index) {
+    int bits = _array.readUnsigned(index) |
+        _array.readUnsigned(index + 1) << 8 |
+        _array.readUnsigned(index + 2) << 16 |
+        _array.readUnsigned(index + 3) << 24;
+    return intBitsToFloat(bits);
+  }
+
+  @override
+  void _setFloat32(int index, double value) {
+    int bits = floatToIntBits(value);
+    _array.write(index, bits);
+    _array.write(index + 1, bits >> 8);
+    _array.write(index + 2, bits >> 16);
+    _array.write(index + 3, bits >> 24);
+  }
+
+  @override
+  double _getFloat64(int index) {
+    int bits = _array.readUnsigned(index) |
+        _array.readUnsigned(index + 1) << 8 |
+        _array.readUnsigned(index + 2) << 16 |
+        _array.readUnsigned(index + 3) << 24 |
+        _array.readUnsigned(index + 4) << 32 |
+        _array.readUnsigned(index + 5) << 40 |
+        _array.readUnsigned(index + 6) << 48 |
+        _array.readUnsigned(index + 7) << 56;
+    return intBitsToDouble(bits);
+  }
+
+  @override
+  void _setFloat64(int index, double value) {
+    int bits = doubleToIntBits(value);
+    _array.write(index, bits);
+    _array.write(index + 1, bits >> 8);
+    _array.write(index + 2, bits >> 16);
+    _array.write(index + 3, bits >> 24);
+    _array.write(index + 4, bits >> 32);
+    _array.write(index + 5, bits >> 40);
+    _array.write(index + 6, bits >> 48);
+    _array.write(index + 7, bits >> 56);
   }
 }
 
@@ -4573,10 +4735,11 @@ class _Float64x2ArrayView extends _TypedListView
 
 @pragma("vm:entry-point")
 class _ByteDataView implements ByteData {
-  @pragma("vm:recognized", "other")
-  @pragma("vm:exact-result-type", _ByteDataView)
-  factory _ByteDataView._(_TypedList buffer, int offsetInBytes, int length)
-      native "TypedDataView_ByteDataView_new";
+  final _TypedList _typedData;
+  final int offsetInBytes;
+  final int length;
+
+  _ByteDataView._(this._typedData, this.offsetInBytes, this.length);
 
   // Method(s) implementing TypedData interface.
   _ByteBuffer get buffer {
@@ -4819,19 +4982,6 @@ class _ByteDataView implements ByteData {
     // TODO(johnmccutchan) : Need to resolve this for endianity.
     _typedData._setFloat32x4(offsetInBytes + byteOffset, value);
   }
-
-  @pragma("vm:recognized", "other")
-  @pragma("vm:non-nullable-result-type")
-  @pragma("vm:prefer-inline")
-  _TypedList get _typedData native "TypedDataView_typedData";
-
-  @pragma("vm:recognized", "other")
-  @pragma("vm:prefer-inline")
-  int get offsetInBytes native "TypedDataView_offsetInBytes";
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  @pragma("vm:prefer-inline")
-  int get length native "TypedDataView_length";
 }
 
 @pragma("vm:prefer-inline")
