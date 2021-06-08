@@ -14,23 +14,27 @@ class _BoxedInt implements int {
   num operator -(num other) native;
   num operator *(num other) native;
 
-  int operator ~/(num other) native;
-
   double operator /(num other) {
     return this.toDouble() / other.toDouble();
   }
 
-  num operator %(num other) native;
+  int operator ~/(num other) => other is int
+      ? this ~/ other
+      : _BoxedDouble._truncDiv(toDouble(), unsafeCast<double>(other));
+
+  num operator %(num other) => other is int
+      ? this % other
+      : _BoxedDouble._modulo(toDouble(), unsafeCast<double>(other));
+
+  num remainder(num other) => other is int
+      ? this - (this ~/ other) * other
+      : _BoxedDouble._remainder(toDouble(), unsafeCast<double>(other));
 
   int operator -() native;
 
   int operator &(int other) native;
   int operator |(int other) native;
   int operator ^(int other) native;
-
-  num remainder(num other) => other is int
-      ? this - (this ~/ other) * other
-      : toDouble().remainder(other);
 
   int operator >>(int other) native;
   int operator >>>(int other) native;
@@ -61,8 +65,8 @@ class _BoxedInt implements int {
             : 0;
   }
 
-  bool get isEven => ((this & 1) == 0);
-  bool get isOdd => !isEven;
+  bool get isEven => (this & 1) == 0;
+  bool get isOdd => (this & 1) != 0;
   bool get isNaN => false;
   bool get isNegative => this < 0;
   bool get isInfinite => false;

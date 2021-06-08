@@ -90,12 +90,28 @@ class Intrinsifier {
         'toInt': (b) {
           b.i64_trunc_sat_f64_s();
         },
+        'roundToDouble': (b) {
+          b.f64_nearest();
+        },
+        'floorToDouble': (b) {
+          b.f64_floor();
+        },
+        'ceilToDouble': (b) {
+          b.f64_ceil();
+        },
+        'truncateToDouble': (b) {
+          b.f64_trunc();
+        },
       },
     };
 
     unaryResultMap = {
       'toDouble': w.NumType.f64,
       'toInt': w.NumType.i64,
+      'roundToDouble': w.NumType.f64,
+      'floorToDouble': w.NumType.f64,
+      'ceilToDouble': w.NumType.f64,
+      'truncateToDouble': w.NumType.f64,
     };
   }
 
@@ -419,7 +435,10 @@ class Intrinsifier {
   bool generateMemberIntrinsic(Reference target, w.DefinedFunction function,
       List<w.Local> paramLocals, w.Label? returnLabel) {
     Member member = target.asMember;
+    if (member is! Procedure) return false;
+    FunctionNode functionNode = member.function;
 
+    // Object.==
     if (member == translator.coreTypes.objectEquals) {
       b.local_get(paramLocals[0]);
       b.local_get(paramLocals[1]);
@@ -427,6 +446,7 @@ class Intrinsifier {
       return true;
     }
 
+    // identical
     if (member == translator.coreTypes.identicalProcedure) {
       w.Local first = paramLocals[0];
       w.Local second = paramLocals[1];
@@ -511,6 +531,96 @@ class Intrinsifier {
       b.ref_eq();
 
       return true;
+    }
+
+    // int members
+    if (member.enclosingClass == translator.boxedIntClass &&
+        member.function.body == null) {
+      String op = member.name.text;
+      if (functionNode.requiredParameterCount == 0) {
+        CodeGenCallback? code = unaryOperatorMap[intType]![op];
+        if (code != null) {
+          w.ValueType resultType = unaryResultMap[op] ?? intType;
+          w.ValueType inputType = function.type.inputs.single;
+          w.ValueType outputType = function.type.outputs.single;
+          b.local_get(function.locals[0]);
+          translator.convertType(function, inputType, intType);
+          code(b);
+          translator.convertType(function, resultType, outputType);
+          return true;
+        }
+      } else if (functionNode.requiredParameterCount == 1) {
+        CodeGenCallback? code = binaryOperatorMap[intType]![op]?[intType];
+        if (code != null) {
+          w.ValueType leftType = function.type.inputs[0];
+          w.ValueType rightType = function.type.inputs[1];
+          w.ValueType outputType = function.type.outputs.single;
+          if (rightType == intType) {
+            // int parameter
+            b.local_get(function.locals[0]);
+            translator.convertType(function, leftType, intType);
+            b.local_get(function.locals[1]);
+            code(b);
+            if (!isComparison(op)) {
+              translator.convertType(function, intType, outputType);
+            }
+            return true;
+          }
+          // num parameter
+          ClassInfo intInfo = translator.classInfo[translator.boxedIntClass]!;
+          w.Label intArg = b.block([], [intInfo.nonNullableType]);
+          b.local_get(function.locals[1]);
+          b.global_get(intInfo.rtt);
+          b.br_on_cast(intArg);
+          // double argument
+          b.drop();
+          b.local_get(function.locals[0]);
+          translator.convertType(function, leftType, intType);
+          b.f64_convert_i64_s();
+          b.local_get(function.locals[1]);
+          translator.convertType(function, rightType, doubleType);
+          // Inline double op
+          CodeGenCallback doubleCode =
+              binaryOperatorMap[doubleType]![op]![doubleType]!;
+          doubleCode(b);
+          if (!isComparison(op)) {
+            translator.convertType(function, doubleType, outputType);
+          }
+          b.return_();
+          b.end();
+          // int argument
+          translator.convertType(function, intInfo.nonNullableType, intType);
+          w.Local rightTemp = function.addLocal(intType);
+          b.local_set(rightTemp);
+          b.local_get(function.locals[0]);
+          translator.convertType(function, leftType, intType);
+          b.local_get(rightTemp);
+          code(b);
+          if (!isComparison(op)) {
+            translator.convertType(function, intType, outputType);
+          }
+          return true;
+        }
+      }
+    }
+
+    // double unary members
+    if (member.enclosingClass == translator.boxedDoubleClass &&
+        member.function.body == null) {
+      String op = member.name.text;
+      if (functionNode.requiredParameterCount == 0) {
+        CodeGenCallback? code = unaryOperatorMap[doubleType]![op];
+        if (code != null) {
+          w.ValueType resultType = unaryResultMap[op] ?? doubleType;
+          w.ValueType inputType = function.type.inputs.single;
+          w.ValueType outputType = function.type.outputs.single;
+          b.local_get(function.locals[0]);
+          translator.convertType(function, inputType, doubleType);
+          code(b);
+          translator.convertType(function, resultType, outputType);
+          return true;
+        }
+      }
     }
 
     return false;

@@ -10,55 +10,55 @@ class _BoxedDouble implements double {
   @pragma("wasm:entry-point")
   double value = 0.0;
 
+  static const int _signMask = 0x8000000000000000;
+  static const int _exponentMask = 0x7FF0000000000000;
+  static const int _mantissaMask = 0x000FFFFFFFFFFFFF;
+
   int get hashCode {
     int bits = doubleToIntBits(this);
-    if (bits == 0x8000000000000000) bits = 0; // 0.0 == -0.0
+    if (bits == _signMask) bits = 0; // 0.0 == -0.0
     return mix64(bits);
   }
 
   int get _identityHashCode => hashCode;
 
-  double operator +(num other) {
-    return _add(other.toDouble());
-  }
-
-  double _add(double other) native "Double_add";
-
-  double operator -(num other) {
-    return _sub(other.toDouble());
-  }
-
-  double _sub(double other) native "Double_sub";
-
-  double operator *(num other) {
-    return _mul(other.toDouble());
-  }
-
-  double _mul(double other) native "Double_mul";
+  double operator +(num other) => this + other.toDouble(); // Intrinsic +
+  double operator -(num other) => this - other.toDouble(); // Intrinsic -
+  double operator *(num other) => this * other.toDouble(); // Intrinsic *
+  double operator /(num other) => this / other.toDouble(); // Intrinsic /
 
   int operator ~/(num other) {
-    return _trunc_div(other.toDouble());
+    return _truncDiv(this, other.toDouble());
   }
 
-  int _trunc_div(double other) native "Double_trunc_div";
-
-  double operator /(num other) {
-    return _div(other.toDouble());
+  static int _truncDiv(double a, double b) {
+    return (a / b).toInt();
   }
-
-  double _div(double other) native "Double_div";
 
   double operator %(num other) {
-    return _modulo(other.toDouble());
+    return _modulo(this, other.toDouble());
   }
 
-  double _modulo(double other) native "Double_modulo";
+  static double _modulo(double a, double b) {
+    double rem = a - (a / b).truncateToDouble() * b;
+    if (rem == 0.0) return 0.0;
+    if (rem < 0.0) {
+      if (b < 0.0) {
+        return rem - b;
+      } else {
+        return rem + b;
+      }
+    }
+    return rem;
+  }
 
   double remainder(num other) {
-    return _remainder(other.toDouble());
+    return _remainder(this, other.toDouble());
   }
 
-  double _remainder(double other) native "Double_remainder";
+  static double _remainder(double a, double b) {
+    return a - (a / b).truncateToDouble() * b;
+  }
 
   double operator -() native "Double_flipSignBit";
 
@@ -70,30 +70,32 @@ class _BoxedDouble implements double {
             : false;
   }
 
-  bool _equalToInteger(int other) native "Double_equalToInteger";
+  bool operator <(num other) => this < other.toDouble(); // Intrinsic <
+  bool operator >(num other) => this > other.toDouble(); // Intrinsic >
+  bool operator >=(num other) => this >= other.toDouble(); // Intrinsic >=
+  bool operator <=(num other) => this <= other.toDouble(); // Intrinsic <=
 
-  bool operator <(num other) {
-    return other > this;
+  bool get isNegative {
+    int bits = doubleToIntBits(this);
+    return (bits & _signMask) != 0;
   }
 
-  bool operator >(num other) {
-    return _greaterThan(other.toDouble());
+  bool get isInfinite {
+    int bits = doubleToIntBits(this);
+    return (bits & _exponentMask) == _exponentMask &&
+        (bits & _mantissaMask) == 0;
   }
 
-  bool _greaterThan(double other) native "Double_greaterThan";
-
-  bool operator >=(num other) {
-    return (this == other) || (this > other);
+  bool get isNaN {
+    int bits = doubleToIntBits(this);
+    return (bits & _exponentMask) == _exponentMask &&
+        (bits & _mantissaMask) != 0;
   }
 
-  bool operator <=(num other) {
-    return (this == other) || (this < other);
+  bool get isFinite {
+    int bits = doubleToIntBits(this);
+    return (bits & _exponentMask) != _exponentMask;
   }
-
-  bool get isNegative native "Double_getIsNegative";
-  bool get isInfinite native "Double_getIsInfinite";
-  bool get isNaN native "Double_getIsNaN";
-  bool get isFinite => !isInfinite && !isNaN; // Can be optimized.
 
   double abs() {
     // Handle negative 0.0.
