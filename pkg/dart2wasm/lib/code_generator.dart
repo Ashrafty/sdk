@@ -900,23 +900,27 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           node.left.getStaticType(typeContext).isPotentiallyNullable;
       bool rightNullable =
           node.right.getStaticType(typeContext).isPotentiallyNullable;
-      w.Label? rightNull;
-      w.Label? leftNull;
+      w.Label? operandNull;
       w.Label? done;
       if (leftNullable || rightNullable) {
         done = b.block([], [w.NumType.i32]);
-        leftNull = b.block();
-        rightNull = b.block([], [translator.topInfo.nullableType]);
+        operandNull = b.block();
       }
       wrap(node.left, translator.topInfo.nullableType);
       b.local_set(leftLocal);
       wrap(node.right, translator.topInfo.nullableType);
-      b.local_set(rightLocal);
+      if (rightNullable) {
+        b.local_tee(rightLocal);
+        b.br_on_null(operandNull!);
+        b.drop();
+      } else {
+        b.local_set(rightLocal);
+      }
 
       void left([_]) {
         b.local_get(leftLocal);
         if (leftNullable) {
-          b.br_on_null(leftNull!);
+          b.br_on_null(operandNull!);
         } else {
           b.ref_as_non_null();
         }
@@ -924,11 +928,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
       void right([_]) {
         b.local_get(rightLocal);
-        if (rightNullable) {
-          b.br_on_null(rightNull!);
-        } else {
-          b.ref_as_non_null();
-        }
+        b.ref_as_non_null();
       }
 
       if (singleTarget != null) {
@@ -941,9 +941,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       }
       if (leftNullable || rightNullable) {
         b.br(done!);
-        b.end(); // rightNull
-        b.drop();
-        b.end(); // leftNull
+        b.end(); // operandNull
         if (leftNullable && rightNullable) {
           // Both sides nullable - compare references
           b.local_get(leftLocal);
@@ -992,8 +990,11 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       } else {
         b.comment("Virtual call of ${selector.name} with no targets"
             " at ${node.location}");
+        b.drop();
+        b.block(const [], selector.signature.outputs);
         b.unreachable();
-        return translator.topInfo.nonNullableType;
+        b.end();
+        return translator.outputOrVoid(selector.signature.outputs);
       }
     }
 
