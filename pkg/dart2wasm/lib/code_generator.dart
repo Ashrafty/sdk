@@ -50,27 +50,30 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   w.ValueType typeForLocal(w.ValueType type) => translator.typeForLocal(type);
 
-  void _unimplemented(TreeNode node, Object message) {
+  void _unimplemented(
+      TreeNode node, Object message, List<w.ValueType> expectedTypes) {
     final text = "Not implemented: $message at ${node.location}";
     print(text);
     b.comment(text);
+    b.block([], expectedTypes);
     b.unreachable();
+    b.end();
   }
 
   @override
   void defaultInitializer(Initializer node) {
-    _unimplemented(node, node.runtimeType);
+    _unimplemented(node, node.runtimeType, []);
   }
 
   @override
   w.ValueType defaultExpression(Expression node, w.ValueType expectedType) {
-    _unimplemented(node, node.runtimeType);
+    _unimplemented(node, node.runtimeType, [expectedType]);
     return expectedType;
   }
 
   @override
   void defaultStatement(Statement node) {
-    _unimplemented(node, node.runtimeType);
+    _unimplemented(node, node.runtimeType, []);
   }
 
   void generate(Reference reference, w.DefinedFunction function,
@@ -493,7 +496,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   void _branchIf(Expression? condition, w.Label target,
       {required bool negated}) {
     if (condition == null) {
-      b.br(target);
+      if (!negated) b.br(target);
       return;
     }
     while (condition is Not) {
@@ -864,8 +867,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           b.end();
           return resultType;
         default:
-          _unimplemented(node, "Nullable invocation of ${target.name.text}");
-          break;
+          _unimplemented(node, "Nullable invocation of ${target.name.text}",
+              [if (expectedType != voidMarker) expectedType]);
+          return expectedType;
       }
     }
     Member? singleTarget = translator.singleTarget(node);
@@ -1227,8 +1231,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           b.end();
           return resultType;
         default:
-          _unimplemented(node, "Nullable get of ${target.name.text}");
-          break;
+          _unimplemented(node, "Nullable get of ${target.name.text}",
+              [if (expectedType != voidMarker) expectedType]);
+          return expectedType;
       }
     }
     Member? singleTarget = translator.singleTarget(node);
@@ -1513,7 +1518,10 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     wrap(node.expression, translator.topInfo.nullableType);
     // TODO: Throw exception
     b.comment(node.toStringInternal());
+    b.drop();
+    b.block([], [if (expectedType != voidMarker) expectedType]);
     b.unreachable();
+    b.end();
     return expectedType;
   }
 

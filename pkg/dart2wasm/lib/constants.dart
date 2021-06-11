@@ -198,7 +198,9 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
     final text = "Not implemented: $node";
     print(text);
     b.comment(text);
+    b.block([], [expectedType]);
     b.unreachable();
+    b.end();
     return expectedType;
   }
 
@@ -214,7 +216,9 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
         // This only happens in invalid but unreachable code produced by the
         // TFA dead-code elimination.
         b.comment("Non-nullable null constant");
+        b.block([], [expectedType]);
         b.unreachable();
+        b.end();
       }
     }
     return expectedType;
