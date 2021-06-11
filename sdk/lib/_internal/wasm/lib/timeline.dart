@@ -8,19 +8,21 @@
 bool _isDartStreamEnabled() => false;
 
 @patch
-int _getTraceClock() native "Timeline_getTraceClock";
+int _getTraceClock() => _traceClock++;
+
+int _traceClock = 0;
 
 @patch
-int _getNextAsyncId() native "Timeline_getNextAsyncId";
+int _getNextAsyncId() => 0;
 
 @patch
 void _reportTaskEvent(int taskId, String phase, String category, String name,
-    String argumentsAsJson) native "Timeline_reportTaskEvent";
+    String argumentsAsJson) {}
 
 @patch
-void _reportFlowEvent(String category, String name, int type, int id,
-    String argumentsAsJson) native "Timeline_reportFlowEvent";
+void _reportFlowEvent(
+    String category, String name, int type, int id, String argumentsAsJson) {}
 
 @patch
-void _reportInstantEvent(String category, String name, String argumentsAsJson)
-    native "Timeline_reportInstantEvent";
+void _reportInstantEvent(
+    String category, String name, String argumentsAsJson) {}
