@@ -1639,19 +1639,30 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   w.ValueType visitIsExpression(IsExpression node, w.ValueType expectedType) {
-    wrap(node.operand, translator.topInfo.nullableType);
     DartType type = node.type;
     if (type is! InterfaceType) {
       // TODO: Check
+      wrap(node.operand, translator.topInfo.nullableType);
       b.drop();
       b.i32_const(1);
       return w.NumType.i32;
+    }
+    DartType operandType = node.operand.getStaticType(typeContext);
+    bool isNullable = operandType.isPotentiallyNullable;
+    w.Label? resultLabel;
+    w.Label? nullLabel;
+    if (isNullable) {
+      resultLabel = b.block([], [w.NumType.i32]);
+      nullLabel = b.block([], []);
+    }
+    wrap(node.operand, translator.topInfo.nullableType);
+    if (isNullable) {
+      b.br_on_null(nullLabel!);
     }
     if (type.typeArguments.any((t) => t is! DynamicType)) {
       // If the tested-against type as an instance of the static operand type
       // has the same type arguments as the static operand type, it is not
       // necessary to test the type arguments.
-      DartType operandType = node.operand.getStaticType(typeContext);
       Class cls = translator.classForType(operandType);
       InterfaceType? base = translator.hierarchy
           .getTypeAsInstanceOf(type, cls, member.enclosingLibrary)
@@ -1688,7 +1699,13 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       }
       b.drop();
       b.i32_const(0);
-      b.end();
+      b.end(); // done
+    }
+    if (isNullable) {
+      b.br(resultLabel!);
+      b.end(); // nullLabel
+      b.i32_const(type.declaredNullability == Nullability.nullable ? 1 : 0);
+      b.end(); // resultLabel
     }
     return w.NumType.i32;
   }
