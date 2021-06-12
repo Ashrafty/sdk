@@ -28,6 +28,19 @@ var importObject = {
     },
     Date: {
         now: Date.now
+    },
+    math: {
+        acos: Math.acos,
+        asin: Math.asin,
+        atan: Math.atan,
+        atan2: Math.atan2,
+        cos: Math.cos,
+        exp: Math.exp,
+        log: Math.log,
+        pow: Math.pow,
+        sin: Math.sin,
+        sqrt: Math.sqrt,
+        tan: Math.tan
     }
 };
 var inst = new WebAssembly.Instance(module, importObject);

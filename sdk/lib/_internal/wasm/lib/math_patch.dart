@@ -64,42 +64,15 @@ T max<T extends num>(T a, T b) {
 // If [x] is an [int] and [exponent] is a non-negative [int], the result is
 // an [int], otherwise the result is a [double].
 @patch
-@pragma("vm:prefer-inline")
 num pow(num x, num exponent) {
   if ((x is int) && (exponent is int) && (exponent >= 0)) {
     return _intPow(x, exponent);
   }
-  return _doublePow(x.toDouble(), exponent.toDouble());
+  return _pow(x.toDouble(), exponent.toDouble());
 }
 
-@pragma("vm:recognized", "other")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-double _doublePow(double base, double exponent) {
-  if (exponent == 0.0) {
-    return 1.0; // ECMA-262 15.8.2.13
-  }
-  // Speed up simple cases.
-  if (exponent == 1.0) return base;
-  if (exponent == 2.0) return base * base;
-  if (exponent == 3.0) return base * base * base;
+double _pow(double base, double exponent) native "math.pow";
 
-  if (base == 1.0) return 1.0;
-
-  if (base.isNaN || exponent.isNaN) {
-    return double.nan;
-  }
-  if ((base != -double.infinity) && (exponent == 0.5)) {
-    if (base == 0.0) {
-      return 0.0;
-    }
-    return sqrt(base);
-  }
-  return _pow(base.toDouble(), exponent.toDouble());
-}
-
-double _pow(double base, double exponent) native "Math_doublePow";
-
-@pragma("vm:recognized", "other")
 int _intPow(int base, int exponent) {
   // Exponentiation by squaring.
   int result = 1;
@@ -117,66 +90,36 @@ int _intPow(int base, int exponent) {
 }
 
 @patch
-@pragma("vm:recognized", "graph-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double atan2(num a, num b) => _atan2(a.toDouble(), b.toDouble());
 @patch
-@pragma("vm:recognized", "graph-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double sin(num radians) => _sin(radians.toDouble());
 @patch
-@pragma("vm:recognized", "graph-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double cos(num radians) => _cos(radians.toDouble());
 @patch
-@pragma("vm:recognized", "graph-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double tan(num radians) => _tan(radians.toDouble());
 @patch
-@pragma("vm:recognized", "graph-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double acos(num x) => _acos(x.toDouble());
 @patch
-@pragma("vm:recognized", "graph-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double asin(num x) => _asin(x.toDouble());
 @patch
-@pragma("vm:recognized", "graph-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double atan(num x) => _atan(x.toDouble());
 @patch
-@pragma("vm:recognized", "asm-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double sqrt(num x) => _sqrt(x.toDouble());
 @patch
-@pragma("vm:recognized", "graph-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double exp(num x) => _exp(x.toDouble());
 @patch
-@pragma("vm:recognized", "graph-intrinsic")
-@pragma("vm:exact-result-type", "dart:core#_Double")
-@pragma("vm:never-inline")
 double log(num x) => _log(x.toDouble());
 
-double _atan2(double a, double b) native "Math_atan2";
-double _sin(double x) native "Math_sin";
-double _cos(double x) native "Math_cos";
-double _tan(double x) native "Math_tan";
-double _acos(double x) native "Math_acos";
-double _asin(double x) native "Math_asin";
-double _atan(double x) native "Math_atan";
-double _sqrt(double x) native "Math_sqrt";
-double _exp(double x) native "Math_exp";
-double _log(double x) native "Math_log";
+double _atan2(double a, double b) native "math.atan2";
+double _sin(double x) native "math.sin";
+double _cos(double x) native "math.cos";
+double _tan(double x) native "math.tan";
+double _acos(double x) native "math.acos";
+double _asin(double x) native "math.asin";
+double _atan(double x) native "math.atan";
+double _sqrt(double x) native "math.sqrt";
+double _exp(double x) native "math.exp";
+double _log(double x) native "math.log";
 
 // TODO(iposva): Handle patch methods within a patch class correctly.
 @patch
