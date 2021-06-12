@@ -458,6 +458,28 @@ class Intrinsifier {
       return true;
     }
 
+    // Object.runtimeType
+    if (member.enclosingClass == translator.coreTypes.objectClass &&
+        member.name.text == "runtimeType") {
+      w.Local receiver = paramLocals[0];
+      ClassInfo info = translator.classInfo[translator.typeClass]!;
+      w.ValueType typeListExpectedType = info.struct.fields[3].type.unpacked;
+
+      b.i32_const(info.classId);
+      b.i32_const(initialIdentityHash);
+      b.local_get(receiver);
+      b.struct_get(translator.topInfo.struct, 0);
+      b.i64_extend_i32_u();
+      // TODO: Type arguments
+      b.global_get(translator.constants.emptyTypeList);
+      translator.convertType(function,
+          translator.constants.emptyTypeList.type.type, typeListExpectedType);
+      b.global_get(info.rtt);
+      b.struct_new_with_rtt(info.struct);
+
+      return true;
+    }
+
     // identical
     if (member == translator.coreTypes.identicalProcedure) {
       w.Local first = paramLocals[0];
