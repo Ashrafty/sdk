@@ -391,10 +391,12 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
   @override
   w.ValueType visitTypeLiteralConstant(TypeLiteralConstant constant) {
     DartType cType = constant.type;
-    DartType type =
-        cType is DynamicType || cType is VoidType || cType is NeverType
-            ? translator.coreTypes.objectRawType(Nullability.nullable)
-            : cType;
+    DartType type = cType is DynamicType ||
+            cType is VoidType ||
+            cType is NeverType ||
+            cType is NullType
+        ? translator.coreTypes.objectRawType(Nullability.nullable)
+        : cType;
     if (type is! InterfaceType) return defaultConstant(constant);
     ClassInfo info = translator.classInfo[translator.typeClass]!;
     instantiateLazyConstant(constant, info.nonNullableType, (function) {

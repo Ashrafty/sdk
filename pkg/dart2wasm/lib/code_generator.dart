@@ -1218,17 +1218,34 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     if (node.kind == InstanceAccessKind.Object) {
       switch (target.name.text) {
         case "hashCode":
-          late w.Label done;
+          late w.Label hashDone;
           w.ValueType resultType = _virtualCall(node, target, (signature) {
-            done = b.block([], signature.outputs);
+            hashDone = b.block([], signature.outputs);
             w.Label nullHash = b.block();
             wrap(node.receiver, translator.topInfo.nullableType);
             b.br_on_null(nullHash);
           }, (_) {}, getter: true, setter: false);
-          b.br(done);
-          b.end();
+          b.br(hashDone);
+          b.end(); // nullHash
           b.i64_const(2011);
-          b.end();
+          b.end(); // hashDone
+          return resultType;
+        case "runtimeType":
+          Member? singleTarget = target;
+          if (singleTarget == null ||
+              singleTarget.enclosingClass != translator.coreTypes.objectClass) {
+            throw "Not supported: Virtual runtimeType at ${node.location}";
+          }
+          w.ValueType resultType = translator.objectInfo.nonNullableType;
+          w.Label typeDone = b.block([], [resultType]);
+          w.Label nullType = b.block();
+          wrap(node.receiver, translator.topInfo.nullableType);
+          b.br_on_null(nullType);
+          _call(singleTarget.reference);
+          b.br(typeDone);
+          b.end(); // nullType
+          wrap(ConstantExpression(TypeLiteralConstant(NullType())), resultType);
+          b.end(); // typeDone
           return resultType;
         default:
           _unimplemented(node, "Nullable get of ${target.name.text}",
@@ -1686,6 +1703,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     return type is DynamicType ||
         type is VoidType ||
         type is NeverType ||
+        type is NullType ||
         type is InterfaceType && type.typeArguments.every(_isTypeConstant);
   }
 
