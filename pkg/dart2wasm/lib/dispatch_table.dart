@@ -106,6 +106,9 @@ class SelectorInfo {
         }
       }
     });
+
+    List<w.ValueType> typeParameters = List.filled(paramInfo.typeParamCount,
+        translator.classInfo[translator.typeClass]!.nullableType);
     List<w.ValueType> inputs = List.generate(
         inputSets.length,
         (i) => translator.typeForInfo(
@@ -115,7 +118,8 @@ class SelectorInfo {
         outputSets.length,
         (i) => translator.typeForInfo(
             upperBound(outputSets[i]), outputNullable[i]) as w.ValueType);
-    return translator.m.addFunctionType(inputs, outputs);
+    return translator.m.addFunctionType(
+        [inputs[0], ...typeParameters, ...inputs.sublist(1)], outputs);
   }
 }
 

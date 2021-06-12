@@ -399,6 +399,10 @@ class Translator {
         throw "Not supported: Tear-off with optional parameters"
             " at ${member.location}";
       }
+      if (functionNode.typeParameters.isNotEmpty) {
+        throw "Not supported: Tear-off with type parameters"
+            " at ${member.location}";
+      }
       w.FunctionType memberSignature = signatureFor(member.reference);
       w.FunctionType closureSignature = functionType(parameterCount);
       int signatureOffset = member.isInstanceMember ? 1 : 0;

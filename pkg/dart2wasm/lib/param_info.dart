@@ -9,6 +9,7 @@ import 'package:kernel/ast.dart';
 
 class ParameterInfo {
   final Member member;
+  int typeParamCount = 0;
   late final List<Constant?> positional;
   late final Map<String, Constant> named;
 
@@ -37,6 +38,10 @@ class ParameterInfo {
       positional = [];
       named = {};
     } else if (function != null) {
+      typeParamCount = (member is Constructor
+              ? member.enclosingClass!.typeParameters
+              : function.typeParameters)
+          .length;
       positional = List.generate(function.positionalParameters.length, (i) {
         if (i < function.requiredParameterCount) return null;
         return defaultValue(function.positionalParameters[i]);
@@ -52,6 +57,7 @@ class ParameterInfo {
   }
 
   void merge(ParameterInfo other) {
+    assert(typeParamCount == other.typeParamCount);
     for (int i = 0; i < other.positional.length; i++) {
       if (i >= positional.length) {
         positional.add(other.positional[i]);

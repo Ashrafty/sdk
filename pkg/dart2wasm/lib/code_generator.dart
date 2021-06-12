@@ -34,6 +34,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
   w.Local? preciseThisLocal;
+  Map<TypeParameter, w.Local> typeLocals = {};
   List<Statement> finalizers = [];
   Map<LabeledStatement, w.Label> labels = {};
   Map<SwitchCase, w.Label> switchLabels = {};
@@ -160,11 +161,10 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       return;
     }
 
-    locals.clear();
     ParameterInfo paramInfo = translator.paramInfoFor(reference);
-    int implicitParams =
-        member.isInstanceMember || member is Constructor ? 1 : 0;
-    assert(implicitParams == 0 || implicitParams == 1);
+    bool hasThis = member.isInstanceMember || member is Constructor;
+    int typeParameterOffset = hasThis ? 1 : 0;
+    int implicitParams = typeParameterOffset + paramInfo.typeParamCount;
     List<VariableDeclaration> positional =
         member.function!.positionalParameters;
     for (int i = 0; i < positional.length; i++) {
@@ -175,10 +175,14 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       locals[param] =
           paramLocals[implicitParams + paramInfo.nameIndex[param.name]!];
     }
+    for (int i = 0; i < member.function!.typeParameters.length; i++) {
+      typeLocals[member.function!.typeParameters[i]] =
+          paramLocals[typeParameterOffset + i];
+    }
 
     closures.findCaptures(member);
 
-    if (implicitParams == 1) {
+    if (hasThis) {
       ClassInfo info = translator.classInfo[member.enclosingClass]!;
       thisLocal = paramLocals[0];
       w.RefType thisType = info.repr.nonNullableType;
@@ -230,6 +234,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     member.function!.body!.accept(this);
     _implicitReturn();
     b.end();
+
+    locals.clear();
+    typeLocals.clear();
   }
 
   void generateLambda(Lambda lambda) {
@@ -398,15 +405,20 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   void visitSuperInitializer(SuperInitializer node) {
-    if ((node.parent as Constructor).enclosingClass.superclass?.superclass ==
-        null) {
+    Supertype? supertype =
+        (node.parent as Constructor).enclosingClass.supertype;
+    if (supertype?.classNode.superclass == null) {
       return;
     }
     b.local_get(thisLocal!);
     if (options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
     }
-    _visitArguments(node.arguments, node.targetReference, 1);
+    for (DartType typeArg in supertype!.typeArguments) {
+      _makeType(typeArg, node);
+    }
+    _visitArguments(node.arguments, node.targetReference,
+        1 + supertype.typeArguments.length);
     _call(node.targetReference);
   }
 
@@ -1490,6 +1502,10 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   void _visitArguments(Arguments node, Reference target, int signatureOffset) {
     final w.FunctionType signature = translator.signatureFor(target);
     final ParameterInfo paramInfo = translator.paramInfoFor(target);
+    for (int i = 0; i < node.types.length; i++) {
+      _makeType(node.types[i], node);
+    }
+    signatureOffset += node.types.length;
     for (int i = 0; i < node.positional.length; i++) {
       wrap(node.positional[i], signature.inputs[signatureOffset + i]);
     }
@@ -1631,6 +1647,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     w.BaseFunction mapFactory =
         translator.functions.getFunction(translator.mapFactory.reference);
     w.ValueType factoryReturnType = mapFactory.type.outputs.single;
+    _makeType(node.keyType, node);
+    _makeType(node.valueType, node);
     b.call(mapFactory);
     if (node.entries.isEmpty) {
       return factoryReturnType;
@@ -1659,14 +1677,26 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     return _makeType(node.type, node);
   }
 
-  w.ValueType _makeType(DartType type, TypeLiteral node) {
+  w.ValueType _makeType(DartType type, TreeNode node) {
+    w.ValueType typeType =
+        translator.classInfo[translator.typeClass]!.nullableType;
     if (_isTypeConstant(type)) {
-      return wrap(ConstantExpression(TypeLiteralConstant(type)),
-          translator.classInfo[translator.typeClass]!.nullableType);
+      return wrap(ConstantExpression(TypeLiteralConstant(type)), typeType);
     }
     if (type is TypeParameterType) {
+      if (type.parameter.parent is FunctionNode) {
+        w.Local? local = typeLocals[type.parameter];
+        if (local != null) {
+          b.local_get(local);
+          return local.type;
+        } else {
+          _unimplemented(
+              node, "Type parameter access inside lambda", [typeType]);
+          return typeType;
+        }
+      }
       // TODO
-      return _makeType(type.bound, node);
+      return _makeType(translator.coreTypes.objectNullableRawType, node);
     }
     ClassInfo info = translator.classInfo[translator.typeClass]!;
     if (type is! InterfaceType) {
@@ -1704,6 +1734,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         type is VoidType ||
         type is NeverType ||
         type is NullType ||
+        type is FunctionType ||
         type is InterfaceType && type.typeArguments.every(_isTypeConstant);
   }
 

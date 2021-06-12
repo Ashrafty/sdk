@@ -37,9 +37,9 @@ class Object {
   int get _identityHashCode => _objectHashCode(this);
 
   @patch
-  String toString() native "Object_toString";
+  String toString() => _toString(this);
   // A statically dispatched version of Object.toString.
-  static String _toString(obj) native "Object_toString";
+  static String _toString(obj) => "Instance of '${obj.runtimeType}'";
 
   @patch
   @pragma("vm:entry-point", "call")

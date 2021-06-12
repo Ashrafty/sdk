@@ -396,7 +396,9 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
             cType is NeverType ||
             cType is NullType
         ? translator.coreTypes.objectRawType(Nullability.nullable)
-        : cType;
+        : cType is FunctionType
+            ? InterfaceType(translator.functionClass, cType.declaredNullability)
+            : cType;
     if (type is! InterfaceType) return defaultConstant(constant);
     ClassInfo info = translator.classInfo[translator.typeClass]!;
     instantiateLazyConstant(constant, info.nonNullableType, (function) {

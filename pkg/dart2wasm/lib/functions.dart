@@ -101,11 +101,16 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
       Reference target, DartType returnType, w.ValueType? receiverType,
       {required bool getter}) {
     Member member = target.asMember;
+    int typeParamCount = 0;
     Iterable<DartType> params;
     if (member is Field) {
       params = [if (target.isImplicitSetter) member.setterType];
     } else {
       FunctionNode function = member.function!;
+      typeParamCount = (member is Constructor
+              ? member.enclosingClass.typeParameters
+              : function.typeParameters)
+          .length;
       List<String> names = [for (var p in function.namedParameters) p.name!]
         ..sort();
       Map<String, DartType> nameTypes = {
@@ -118,10 +123,14 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
       function.positionalParameters.map((p) => p.type);
     }
 
+    List<w.ValueType> typeParameters = List.filled(typeParamCount,
+        translator.classInfo[translator.typeClass]!.nullableType);
+
     List<w.ValueType> inputs = [];
     if (receiverType != null) {
       inputs.add(receiverType);
     }
+    inputs.addAll(typeParameters);
     inputs.addAll(params.map((t) => translator.translateType(t)));
 
     List<w.ValueType> outputs = returnType is VoidType ||
