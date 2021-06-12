@@ -30,11 +30,13 @@ class Constants {
   late final w.DefinedFunction oneByteStringFunction;
   late final w.DefinedFunction twoByteStringFunction;
   late final w.DefinedGlobal emptyString;
+  late final w.DefinedGlobal emptyTypeList;
 
   Constants(this.translator) {
     oneByteStringFunction = makeStringFunction(translator.oneByteStringClass);
     twoByteStringFunction = makeStringFunction(translator.twoByteStringClass);
     initEmptyString();
+    initEmptyTypeList();
   }
 
   w.Module get m => translator.m;
@@ -59,6 +61,30 @@ class Constants {
     b.global_get(info.rtt);
     b.struct_new_with_rtt(info.struct);
     b.global_set(emptyString);
+  }
+
+  void initEmptyTypeList() {
+    // TODO: Use unmodifiable list
+    ClassInfo info = translator.classInfo[translator.fixedLengthListClass]!;
+    w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
+    w.ArrayType arrayType =
+        (refType.heapType as w.DefHeapType).def as w.ArrayType;
+
+    w.RefType emptyListType = info.nullableType;
+    emptyTypeList = m.addGlobal(w.GlobalType(emptyListType));
+    emptyTypeList.initializer.ref_null(emptyListType.heapType);
+    emptyTypeList.initializer.end();
+
+    w.Instructions b = translator.initFunction.body;
+    b.i32_const(info.classId);
+    b.i32_const(initialIdentityHash);
+    b.i64_const(0);
+    b.i32_const(0);
+    b.rtt_canon(arrayType);
+    b.array_new_default_with_rtt(arrayType);
+    b.global_get(info.rtt);
+    b.struct_new_with_rtt(info.struct);
+    b.global_set(emptyTypeList);
   }
 
   void finalize() {
@@ -364,21 +390,31 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
 
   @override
   w.ValueType visitTypeLiteralConstant(TypeLiteralConstant constant) {
-    DartType type = constant.type;
+    DartType cType = constant.type;
+    DartType type =
+        cType is DynamicType || cType is VoidType || cType is NeverType
+            ? translator.coreTypes.objectRawType(Nullability.nullable)
+            : cType;
     if (type is! InterfaceType) return defaultConstant(constant);
     ClassInfo info = translator.classInfo[translator.typeClass]!;
     instantiateLazyConstant(constant, info.nonNullableType, (function) {
       ClassInfo typeInfo = translator.classInfo[type.classNode]!;
-      ListConstant typeArgs = ListConstant(
-          InterfaceType(translator.typeClass, Nullability.nonNullable),
-          type.typeArguments.map((t) => TypeLiteralConstant(t)).toList());
+      w.ValueType typeListExpectedType = info.struct.fields[3].type.unpacked;
 
       w.Instructions b = function.body;
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
       b.i64_const(typeInfo.classId);
-      constants.instantiateConstant(
-          function, typeArgs, info.struct.fields[3].type.unpacked);
+      if (type.typeArguments.isEmpty) {
+        b.global_get(constants.emptyTypeList);
+        translator.convertType(
+            function, constants.emptyTypeList.type.type, typeListExpectedType);
+      } else {
+        ListConstant typeArgs = ListConstant(
+            InterfaceType(translator.typeClass, Nullability.nonNullable),
+            type.typeArguments.map((t) => TypeLiteralConstant(t)).toList());
+        constants.instantiateConstant(function, typeArgs, typeListExpectedType);
+      }
       b.global_get(info.rtt);
       b.struct_new_with_rtt(info.struct);
     });

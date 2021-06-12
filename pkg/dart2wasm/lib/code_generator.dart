@@ -1638,6 +1638,58 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   @override
+  w.ValueType visitTypeLiteral(TypeLiteral node, w.ValueType expectedType) {
+    return _makeType(node.type, node);
+  }
+
+  w.ValueType _makeType(DartType type, TypeLiteral node) {
+    if (_isTypeConstant(type)) {
+      return wrap(ConstantExpression(TypeLiteralConstant(type)),
+          translator.classInfo[translator.typeClass]!.nullableType);
+    }
+    if (type is TypeParameterType) {
+      // TODO
+      return _makeType(type.bound, node);
+    }
+    ClassInfo info = translator.classInfo[translator.typeClass]!;
+    if (type is! InterfaceType) {
+      _unimplemented(node, type, [info.nullableType]);
+      return info.nullableType;
+    }
+    ClassInfo typeInfo = translator.classInfo[type.classNode]!;
+    w.ValueType typeListExpectedType = info.struct.fields[3].type.unpacked;
+    b.i32_const(info.classId);
+    b.i32_const(initialIdentityHash);
+    b.i64_const(typeInfo.classId);
+    if (type.typeArguments.isEmpty) {
+      b.global_get(translator.constants.emptyTypeList);
+      translator.convertType(function,
+          translator.constants.emptyTypeList.type.type, typeListExpectedType);
+    } else if (type.typeArguments.every(_isTypeConstant)) {
+      ListConstant typeArgs = ListConstant(
+          InterfaceType(translator.typeClass, Nullability.nonNullable),
+          type.typeArguments.map((t) => TypeLiteralConstant(t)).toList());
+      translator.constants
+          .instantiateConstant(function, typeArgs, typeListExpectedType);
+    } else {
+      w.ValueType listType = _makeList(
+          type.typeArguments.map((t) => TypeLiteral(t)).toList(),
+          translator.fixedLengthListClass);
+      translator.convertType(function, listType, typeListExpectedType);
+    }
+    b.global_get(info.rtt);
+    b.struct_new_with_rtt(info.struct);
+    return info.nullableType;
+  }
+
+  bool _isTypeConstant(DartType type) {
+    return type is DynamicType ||
+        type is VoidType ||
+        type is NeverType ||
+        type is InterfaceType && type.typeArguments.every(_isTypeConstant);
+  }
+
+  @override
   w.ValueType visitIsExpression(IsExpression node, w.ValueType expectedType) {
     DartType type = node.type;
     if (type is! InterfaceType) {
