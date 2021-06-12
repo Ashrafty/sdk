@@ -60,6 +60,7 @@ class Translator {
   late final Class stringBaseClass;
   late final Class oneByteStringClass;
   late final Class twoByteStringClass;
+  late final Class typeClass;
   late final Procedure stringEquals;
   late final Procedure stringInterpolate;
   late final Procedure mapFactory;
@@ -127,6 +128,7 @@ class Translator {
     stringBaseClass = lookupCore("_StringBase");
     oneByteStringClass = lookupCore("_OneByteString");
     twoByteStringClass = lookupCore("_TwoByteString");
+    typeClass = lookupCore("_Type");
     stringEquals =
         stringBaseClass.procedures.firstWhere((p) => p.name.text == "==");
     stringInterpolate = stringBaseClass.procedures

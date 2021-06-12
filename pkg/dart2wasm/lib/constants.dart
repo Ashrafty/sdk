@@ -361,4 +361,27 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
     });
     return type;
   }
+
+  @override
+  w.ValueType visitTypeLiteralConstant(TypeLiteralConstant constant) {
+    DartType type = constant.type;
+    if (type is! InterfaceType) return defaultConstant(constant);
+    ClassInfo info = translator.classInfo[translator.typeClass]!;
+    instantiateLazyConstant(constant, info.nonNullableType, (function) {
+      ClassInfo typeInfo = translator.classInfo[type.classNode]!;
+      ListConstant typeArgs = ListConstant(
+          InterfaceType(translator.typeClass, Nullability.nonNullable),
+          type.typeArguments.map((t) => TypeLiteralConstant(t)).toList());
+
+      w.Instructions b = function.body;
+      b.i32_const(info.classId);
+      b.i32_const(initialIdentityHash);
+      b.i64_const(typeInfo.classId);
+      constants.instantiateConstant(
+          function, typeArgs, info.struct.fields[3].type.unpacked);
+      b.global_get(info.rtt);
+      b.struct_new_with_rtt(info.struct);
+    });
+    return info.nonNullableType;
+  }
 }

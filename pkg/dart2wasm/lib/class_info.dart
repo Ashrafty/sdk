@@ -101,14 +101,15 @@ class ClassInfoCollector {
         for (Supertype interface in cls.implementedTypes) {
           initialize(interface.classNode);
         }
-        // In the Wasm type hierarchy, Object, bool and num sit directly under
-        // the Top type, The _StringBase class sits under the String class, and
-        // the box classes sit under their corresponding unboxed types.
+        // In the Wasm type hierarchy, Object, bool and num sit directly below
+        // the Top type. The implementation classes (_StringBase, _Type and the
+        // box classes) sit directly below the public classes they implement.
         // All other classes sit below their superclass.
         ClassInfo superInfo = cls == translator.coreTypes.boolClass ||
                 cls == translator.coreTypes.numClass
             ? topInfo
             : cls == translator.stringBaseClass ||
+                    cls == translator.typeClass ||
                     translator.boxedClasses.values.contains(cls)
                 ? translator.classInfo[cls.implementedTypes.single.classNode]!
                 : translator.classInfo[superclass]!;
