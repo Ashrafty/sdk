@@ -198,6 +198,9 @@ class Translator {
       String exportName = reference.isSetter ? "$member=" : "$member";
       if (options.printKernel || options.printWasm) {
         print("#${function.index}: $exportName");
+        print(member.function
+            ?.computeFunctionType(Nullability.nonNullable)
+            .toStringInternal());
       }
       if (options.printKernel) {
         if (member is Constructor) {
@@ -221,7 +224,10 @@ class Translator {
         m.exportFunction(exportName, function);
       }
       codeGen.generate(reference, function, function.locals);
-      if (options.printWasm) print(function.body.trace);
+      if (options.printWasm) {
+        print(function.type);
+        print(function.body.trace);
+      }
 
       for (Lambda lambda in codeGen.closures.lambdas.values) {
         codeGen.generateLambda(lambda);
@@ -315,7 +321,9 @@ class Translator {
       return voidMarker;
     }
     if (type is TypeParameterType) {
-      return translateStorageType(type.bound);
+      return translateStorageType(type.isPotentiallyNullable
+          ? type.bound.withDeclaredNullability(type.nullability)
+          : type.bound);
     }
     if (type is FutureOrType) {
       return topInfo.nullableType;
