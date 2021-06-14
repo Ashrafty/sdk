@@ -8,6 +8,7 @@ import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
+import 'package:kernel/type_algebra.dart' show substitute;
 import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
@@ -313,7 +314,8 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
 
   @override
   w.ValueType visitInstanceConstant(InstanceConstant constant) {
-    ClassInfo info = translator.classInfo[constant.classNode]!;
+    Class cls = constant.classNode;
+    ClassInfo info = translator.classInfo[cls]!;
     w.RefType type = info.nonNullableType;
     instantiateLazyConstant(constant, type, (function) {
       const int baseFieldCount = 2;
@@ -325,18 +327,29 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
         subConstants[index] = subConstant;
       });
 
+      Map<TypeParameter, DartType> substitution = {};
+      List<DartType> args = constant.typeArguments;
+      while (true) {
+        for (int i = 0; i < cls.typeParameters.length; i++) {
+          TypeParameter parameter = cls.typeParameters[i];
+          DartType arg = substitute(args[i], substitution);
+          substitution[parameter] = arg;
+          int index = translator.typeParameterIndex[parameter]!;
+          subConstants[index] = TypeLiteralConstant(arg);
+        }
+        Supertype? supertype = cls.supertype;
+        if (supertype == null) break;
+        cls = supertype.classNode;
+        args = supertype.typeArguments;
+      }
+
       w.Instructions b = function.body;
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
       for (int i = baseFieldCount; i < fieldCount; i++) {
-        Constant? subConstant = subConstants[i];
-        if (subConstant != null) {
-          constants.instantiateConstant(
-              function, subConstant, info.struct.fields[i].type.unpacked);
-        } else {
-          // TODO: Type arguments
-          b.ref_null(w.HeapType.def(constants.typeInfo.struct));
-        }
+        Constant subConstant = subConstants[i]!;
+        constants.instantiateConstant(
+            function, subConstant, info.struct.fields[i].type.unpacked);
       }
       b.global_get(info.rtt);
       b.struct_new_with_rtt(info.struct);
