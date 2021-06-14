@@ -77,6 +77,7 @@ class Translator {
   Map<Class, ClassInfo> classInfo = {};
   Map<w.HeapType, ClassInfo> classForHeapType = {};
   Map<Field, int> fieldIndex = {};
+  Map<TypeParameter, int> typeParameterIndex = {};
   Map<Reference, ParameterInfo> staticParamInfo = {};
   late Procedure mainFunction;
   late final w.Module m;

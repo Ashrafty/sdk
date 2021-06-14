@@ -64,50 +64,52 @@ class Closures {
 
   Translator get translator => codeGen.translator;
 
-  void findCaptures(TreeNode node) {
-    var find = FindCaptures(this);
-    if (node is Constructor) {
-      Class cls = node.enclosingClass;
+  void findCaptures(Member member) {
+    var find = FindCaptures(this, member);
+    if (member is Constructor) {
+      Class cls = member.enclosingClass;
       for (Field field in cls.fields) {
         if (field.isInstanceMember && field.initializer != null) {
           field.initializer!.accept(find);
         }
       }
     }
-    node.accept(find);
+    member.accept(find);
   }
 
-  void buildContexts(TreeNode node) {
+  void collectContexts(TreeNode node, {TreeNode? container}) {
     if (captures.isNotEmpty || isThisCaptured) {
-      node.accept(BuildContexts(this));
+      node.accept(BuildContexts(this, container));
+    }
+  }
 
-      // Make struct definitions
-      for (Context context in contexts.values) {
-        if (!context.isEmpty) {
-          context.struct = translator.m.addStructType("<context>");
-        }
+  void buildContexts() {
+    // Make struct definitions
+    for (Context context in contexts.values) {
+      if (!context.isEmpty) {
+        context.struct = translator.m.addStructType("<context>");
       }
+    }
 
-      // Build object layouts
-      for (Context context in contexts.values) {
-        if (!context.isEmpty) {
-          // TODO: Non-nullable, immutable parent/this when supported
-          w.StructType struct = context.struct;
-          if (context.parent != null) {
-            assert(!context.containsThis);
-            struct.fields.add(w.FieldType(
-                w.RefType.def(context.parent!.struct, nullable: true)));
-          }
-          if (context.containsThis) {
-            struct.fields.add(w.FieldType(
-                codeGen.preciseThisLocal!.type.withNullability(true)));
-          }
-          for (VariableDeclaration variable in context.variables) {
-            int index = struct.fields.length;
-            struct.fields.add(w.FieldType(
-                translator.translateType(variable.type).withNullability(true)));
-            captures[variable]!.fieldIndex = index;
-          }
+    // Build object layouts
+    for (Context context in contexts.values) {
+      if (!context.isEmpty) {
+        // TODO: Non-nullable, immutable parent/this when supported
+        w.StructType struct = context.struct;
+        if (context.parent != null) {
+          assert(!context.containsThis);
+          struct.fields.add(w.FieldType(
+              w.RefType.def(context.parent!.struct, nullable: true)));
+        }
+        if (context.containsThis) {
+          struct.fields.add(w.FieldType(
+              codeGen.preciseThisLocal!.type.withNullability(true)));
+        }
+        for (VariableDeclaration variable in context.variables) {
+          int index = struct.fields.length;
+          struct.fields.add(w.FieldType(
+              translator.translateType(variable.type).withNullability(true)));
+          captures[variable]!.fieldIndex = index;
         }
       }
     }
@@ -116,10 +118,11 @@ class Closures {
 
 class FindCaptures extends RecursiveVisitor {
   final Closures closures;
+  final Member member;
   final Map<VariableDeclaration, int> variableDepth = {};
   int depth = 0;
 
-  FindCaptures(this.closures);
+  FindCaptures(this.closures, this.member);
 
   Translator get translator => closures.translator;
 
@@ -173,6 +176,13 @@ class FindCaptures extends RecursiveVisitor {
     super.visitSuperMethodInvocation(node);
   }
 
+  @override
+  void visitTypeParameterType(TypeParameterType node) {
+    if (node.parameter.parent == member.enclosingClass) {
+      _visitThis();
+    }
+  }
+
   void _visitLambda(FunctionNode node) {
     if (node.positionalParameters.length != node.requiredParameterCount ||
         node.namedParameters.isNotEmpty) {
@@ -206,7 +216,11 @@ class BuildContexts extends RecursiveVisitor {
   final Closures closures;
   Context? currentContext;
 
-  BuildContexts(this.closures);
+  BuildContexts(this.closures, TreeNode? container) {
+    if (container != null) {
+      currentContext = closures.contexts[container]!;
+    }
+  }
 
   @override
   void visitAssertStatement(AssertStatement node) {}
@@ -223,6 +237,13 @@ class BuildContexts extends RecursiveVisitor {
     closures.contexts[node] = currentContext!;
     node.visitChildren(this);
     currentContext = oldContext;
+  }
+
+  @override
+  void visitConstructor(Constructor node) {
+    node.function.accept(this);
+    currentContext = closures.contexts[node.function]!;
+    visitList(node.initializers, this);
   }
 
   @override

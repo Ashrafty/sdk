@@ -19,6 +19,7 @@ class ClassInfo {
   w.StructType struct;
   w.DefinedGlobal rtt;
   ClassInfo? superInfo;
+  Map<TypeParameter, TypeParameter> typeParameterMatch = {};
   late ClassInfo repr;
   List<ClassInfo> implementedBy = [];
 
@@ -91,8 +92,8 @@ class ClassInfoCollector {
         ClassInfo superInfo = topInfo;
         final w.StructType struct = m.addStructType(cls.name);
         final w.DefinedGlobal rtt = makeRtt(m, struct, superInfo);
-        info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt);
-        info.superInfo = superInfo;
+        info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt)
+          ..superInfo = superInfo;
         // Mark Top type as implementing Object to force the representation
         // type of Object to be Top.
         info.implementedBy.add(topInfo);
@@ -113,13 +114,31 @@ class ClassInfoCollector {
                     translator.boxedClasses.values.contains(cls)
                 ? translator.classInfo[cls.implementedTypes.single.classNode]!
                 : translator.classInfo[superclass]!;
+        Map<TypeParameter, TypeParameter> typeParameterMatch = {};
+        if (cls.typeParameters.isNotEmpty) {
+          Supertype supertype = cls.superclass == superInfo.cls
+              ? cls.supertype!
+              : cls.implementedTypes.single;
+          for (TypeParameter parameter in cls.typeParameters) {
+            for (int i = 0; i < supertype.typeArguments.length; i++) {
+              DartType arg = supertype.typeArguments[i];
+              if (arg is TypeParameterType && arg.parameter == parameter) {
+                typeParameterMatch[parameter] =
+                    superInfo.cls!.typeParameters[i];
+                break;
+              }
+            }
+          }
+        }
+        bool canReuseSuperStruct =
+            typeParameterMatch.length == cls.typeParameters.length &&
+                cls.fields.where((f) => f.isInstanceMember).isEmpty;
         w.StructType struct =
-            cls.fields.where((f) => f.isInstanceMember).isEmpty
-                ? superInfo.struct
-                : m.addStructType(cls.name);
+            canReuseSuperStruct ? superInfo.struct : m.addStructType(cls.name);
         final w.DefinedGlobal rtt = makeRtt(m, struct, superInfo);
-        info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt);
-        info.superInfo = superInfo;
+        info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt)
+          ..superInfo = superInfo
+          ..typeParameterMatch = typeParameterMatch;
         for (Supertype interface in cls.implementedTypes) {
           translator.classInfo[interface.classNode]!.implementedBy.add(info);
         }
@@ -149,6 +168,21 @@ class ClassInfoCollector {
         // Object - add identity hash code field
         info.struct.fields.add(w.FieldType(w.NumType.i32));
       }
+      // Add fields for type variables
+      late w.FieldType typeType =
+          w.FieldType(translator.classInfo[translator.typeClass]!.nullableType);
+      for (TypeParameter parameter in info.cls!.typeParameters) {
+        TypeParameter? match = info.typeParameterMatch[parameter];
+        if (match != null) {
+          // Reuse supertype type variable
+          translator.typeParameterIndex[parameter] =
+              translator.typeParameterIndex[match]!;
+        } else {
+          translator.typeParameterIndex[parameter] = info.struct.fields.length;
+          info.struct.fields.add(typeType);
+        }
+      }
+      // Add fields for Dart instance fields
       for (Field field in info.cls!.fields) {
         if (field.isInstanceMember) {
           w.ValueType wasmType = translator.translateType(field.type);
@@ -159,6 +193,12 @@ class ClassInfoCollector {
           translator.fieldIndex[field] = info.struct.fields.length;
           info.struct.fields.add(w.FieldType(wasmType));
         }
+      }
+    } else {
+      for (TypeParameter parameter in info.cls!.typeParameters) {
+        // Reuse supertype type variable
+        translator.typeParameterIndex[parameter] =
+            translator.typeParameterIndex[info.typeParameterMatch[parameter]]!;
       }
     }
   }

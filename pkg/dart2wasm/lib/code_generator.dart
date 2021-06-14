@@ -175,15 +175,18 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       locals[param] =
           paramLocals[implicitParams + paramInfo.nameIndex[param.name]!];
     }
-    for (int i = 0; i < member.function!.typeParameters.length; i++) {
-      typeLocals[member.function!.typeParameters[i]] =
-          paramLocals[typeParameterOffset + i];
+    List<TypeParameter> typeParameters = member is Constructor
+        ? member.enclosingClass.typeParameters
+        : member.function!.typeParameters;
+    for (int i = 0; i < typeParameters.length; i++) {
+      typeLocals[typeParameters[i]] = paramLocals[typeParameterOffset + i];
     }
 
     closures.findCaptures(member);
 
     if (hasThis) {
-      ClassInfo info = translator.classInfo[member.enclosingClass]!;
+      Class cls = member.enclosingClass!;
+      ClassInfo info = translator.classInfo[cls]!;
       thisLocal = paramLocals[0];
       w.RefType thisType = info.repr.nonNullableType;
       if (translator.needsConversion(paramLocals[0].type, thisType)) {
@@ -195,31 +198,22 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       } else {
         preciseThisLocal = paramLocals[0];
       }
-
-      if (member is Constructor) {
-        if (!options.stubBodies) {
-          Class cls = member.enclosingClass;
-          for (Field field in cls.fields) {
-            if (field.isInstanceMember && field.initializer != null) {
-              closures.buildContexts(field.initializer!);
-              int fieldIndex = translator.fieldIndex[field]!;
-              b.local_get(thisLocal!);
-              wrap(field.initializer!,
-                  info.struct.fields[fieldIndex].type.unpacked);
-              b.struct_set(info.struct, fieldIndex);
-            }
-          }
-          for (Initializer initializer in member.initializers) {
-            initializer.accept(this);
-          }
-        }
-      }
     } else {
       thisLocal = null;
       preciseThisLocal = null;
     }
 
-    closures.buildContexts(member);
+    closures.collectContexts(member);
+    if (member is Constructor) {
+      for (Field field in member.enclosingClass.fields) {
+        if (field.isInstanceMember && field.initializer != null) {
+          closures.collectContexts(field.initializer!,
+              container: member.function);
+        }
+      }
+    }
+    closures.buildContexts();
+
     allocateContext(member.function!);
     captureParameters();
 
@@ -229,6 +223,28 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.unreachable();
       b.end();
       return;
+    }
+
+    if (member is Constructor) {
+      Class cls = member.enclosingClass;
+      ClassInfo info = translator.classInfo[cls]!;
+      for (TypeParameter typeParam in cls.typeParameters) {
+        b.local_get(thisLocal!);
+        b.local_get(typeLocals[typeParam]!);
+        b.struct_set(info.struct, translator.typeParameterIndex[typeParam]!);
+      }
+      for (Field field in cls.fields) {
+        if (field.isInstanceMember && field.initializer != null) {
+          int fieldIndex = translator.fieldIndex[field]!;
+          b.local_get(thisLocal!);
+          wrap(
+              field.initializer!, info.struct.fields[fieldIndex].type.unpacked);
+          b.struct_set(info.struct, fieldIndex);
+        }
+      }
+      for (Initializer initializer in member.initializers) {
+        initializer.accept(this);
+      }
     }
 
     member.function!.body!.accept(this);
@@ -244,6 +260,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     b = function.body;
     paramLocals = function.locals;
     returnType = function.type.outputs.single;
+
+    thisLocal = null;
+    preciseThisLocal = null;
 
     locals.clear();
     final int implicitParams = 1;
@@ -1542,7 +1561,11 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitStringConcatenation(
       StringConcatenation node, w.ValueType expectedType) {
-    _makeList(node.expressions, translator.fixedLengthListClass);
+    _makeList(
+        node.expressions,
+        translator.fixedLengthListClass,
+        InterfaceType(translator.stringBaseClass, Nullability.nonNullable),
+        node);
     return _call(translator.stringInterpolate.reference);
   }
 
@@ -1605,10 +1628,12 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   w.ValueType visitListLiteral(ListLiteral node, w.ValueType expectedType) {
-    return _makeList(node.expressions, translator.growableListClass);
+    return _makeList(node.expressions, translator.growableListClass,
+        node.typeArgument, node);
   }
 
-  w.ValueType _makeList(List<Expression> expressions, Class cls) {
+  w.ValueType _makeList(List<Expression> expressions, Class cls,
+      DartType typeArg, TreeNode node) {
     ClassInfo info = translator.classInfo[cls]!;
     w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
     w.ArrayType arrayType =
@@ -1618,6 +1643,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
     b.i32_const(info.classId);
     b.i32_const(initialIdentityHash);
+    _makeType(typeArg, node);
     b.i64_const(length);
     b.i32_const(length);
     b.rtt_canon(arrayType);
@@ -1685,6 +1711,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
     if (type is TypeParameterType) {
       if (type.parameter.parent is FunctionNode) {
+        // Type argument to function
         w.Local? local = typeLocals[type.parameter];
         if (local != null) {
           b.local_get(local);
@@ -1695,8 +1722,14 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           return typeType;
         }
       }
-      // TODO
-      return _makeType(translator.coreTypes.objectNullableRawType, node);
+      // Type argument of class
+      Class cls = type.parameter.parent as Class;
+      ClassInfo info = translator.classInfo[cls]!;
+      int fieldIndex = translator.typeParameterIndex[type.parameter]!;
+      w.ValueType thisType = _visitThis(info.nullableType);
+      translator.convertType(function, thisType, info.nullableType);
+      b.struct_get(info.struct, fieldIndex);
+      return typeType;
     }
     ClassInfo info = translator.classInfo[translator.typeClass]!;
     if (type is! InterfaceType) {
@@ -1721,7 +1754,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     } else {
       w.ValueType listType = _makeList(
           type.typeArguments.map((t) => TypeLiteral(t)).toList(),
-          translator.fixedLengthListClass);
+          translator.fixedLengthListClass,
+          InterfaceType(translator.typeClass, Nullability.nonNullable),
+          node);
       translator.convertType(function, listType, typeListExpectedType);
     }
     b.global_get(info.rtt);

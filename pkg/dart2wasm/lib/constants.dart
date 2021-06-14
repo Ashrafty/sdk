@@ -31,6 +31,7 @@ class Constants {
   late final w.DefinedFunction twoByteStringFunction;
   late final w.DefinedGlobal emptyString;
   late final w.DefinedGlobal emptyTypeList;
+  late final ClassInfo typeInfo = translator.classInfo[translator.typeClass]!;
 
   Constants(this.translator) {
     oneByteStringFunction = makeStringFunction(translator.oneByteStringClass);
@@ -75,9 +76,11 @@ class Constants {
     emptyTypeList.initializer.ref_null(emptyListType.heapType);
     emptyTypeList.initializer.end();
 
+    // Create the empty type list with its type parameter uninitialized for now.
     w.Instructions b = translator.initFunction.body;
     b.i32_const(info.classId);
     b.i32_const(initialIdentityHash);
+    b.ref_null(w.HeapType.def(typeInfo.struct)); // Initialized later
     b.i64_const(0);
     b.i32_const(0);
     b.rtt_canon(arrayType);
@@ -85,6 +88,17 @@ class Constants {
     b.global_get(info.rtt);
     b.struct_new_with_rtt(info.struct);
     b.global_set(emptyTypeList);
+
+    // Initialize the type parameter of the empty type list to the type object
+    // for _Type, which itself refers to the empty type list.
+    b.global_get(emptyTypeList);
+    instantiateConstant(
+        translator.initFunction,
+        TypeLiteralConstant(
+            InterfaceType(translator.typeClass, Nullability.nonNullable)),
+        typeInfo.nullableType);
+    b.struct_set(info.struct,
+        translator.typeParameterIndex[info.cls!.typeParameters.single]!);
   }
 
   void finalize() {
@@ -303,11 +317,10 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
     w.RefType type = info.nonNullableType;
     instantiateLazyConstant(constant, type, (function) {
       const int baseFieldCount = 2;
-      int fieldCount = constant.fieldValues.length;
-      assert(info.struct.fields.length == baseFieldCount + fieldCount);
+      int fieldCount = info.struct.fields.length;
       List<Constant?> subConstants = List.filled(fieldCount, null);
       constant.fieldValues.forEach((reference, subConstant) {
-        int index = translator.fieldIndex[reference.asField]! - baseFieldCount;
+        int index = translator.fieldIndex[reference.asField]!;
         assert(subConstants[index] == null);
         subConstants[index] = subConstant;
       });
@@ -315,9 +328,15 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
       w.Instructions b = function.body;
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
-      for (int i = 0; i < fieldCount; i++) {
-        constants.instantiateConstant(function, subConstants[i]!,
-            info.struct.fields[baseFieldCount + i].type.unpacked);
+      for (int i = baseFieldCount; i < fieldCount; i++) {
+        Constant? subConstant = subConstants[i];
+        if (subConstant != null) {
+          constants.instantiateConstant(
+              function, subConstant, info.struct.fields[i].type.unpacked);
+        } else {
+          // TODO: Type arguments
+          b.ref_null(w.HeapType.def(constants.typeInfo.struct));
+        }
       }
       b.global_get(info.rtt);
       b.struct_new_with_rtt(info.struct);
@@ -341,6 +360,10 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
       w.Instructions b = function.body;
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
+      constants.instantiateConstant(
+          function,
+          TypeLiteralConstant(constant.typeArgument),
+          constants.typeInfo.nullableType);
       b.i64_const(length);
       b.i32_const(length);
       b.rtt_canon(arrayType);
@@ -391,6 +414,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
   @override
   w.ValueType visitTypeLiteralConstant(TypeLiteralConstant constant) {
     DartType cType = constant.type;
+    assert(cType is! TypeParameterType);
     DartType type = cType is DynamicType ||
             cType is VoidType ||
             cType is NeverType ||
@@ -400,7 +424,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
             ? InterfaceType(translator.functionClass, cType.declaredNullability)
             : cType;
     if (type is! InterfaceType) return defaultConstant(constant);
-    ClassInfo info = translator.classInfo[translator.typeClass]!;
+    ClassInfo info = constants.typeInfo;
     instantiateLazyConstant(constant, info.nonNullableType, (function) {
       ClassInfo typeInfo = translator.classInfo[type.classNode]!;
       w.ValueType typeListExpectedType = info.struct.fields[3].type.unpacked;
