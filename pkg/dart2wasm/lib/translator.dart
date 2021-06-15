@@ -10,6 +10,7 @@ import 'package:dart2wasm/dispatch_table.dart';
 import 'package:dart2wasm/functions.dart';
 import 'package:dart2wasm/globals.dart';
 import 'package:dart2wasm/param_info.dart';
+import 'package:dart2wasm/tearoff_reference.dart';
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart'
@@ -196,7 +197,20 @@ class Translator {
       Member member = reference.asMember;
       var function =
           functions.getExistingFunction(reference) as w.DefinedFunction;
-      String exportName = reference.isSetter ? "$member=" : "$member";
+
+      String exportName = "$member";
+      if (reference.isSetter) {
+        exportName = "$exportName=";
+      } else if (reference.isGetter || reference.isTearOffReference) {
+        int dot = exportName.indexOf('.');
+        exportName = exportName.substring(0, dot + 1) +
+            '=' +
+            exportName.substring(dot + 1);
+      }
+      exportName = member.enclosingLibrary == libraries.first
+          ? exportName
+          : "${member.enclosingLibrary.importUri} $exportName";
+
       if (options.printKernel || options.printWasm) {
         print("#${function.index}: $exportName");
         print(member.function
@@ -221,10 +235,12 @@ class Translator {
         }
         if (!options.printWasm) print("");
       }
+
       if (member == mainFunction || options.exportAll) {
         m.exportFunction(exportName, function);
       }
       codeGen.generate(reference, function, function.locals);
+
       if (options.printWasm) {
         print(function.type);
         print(function.body.trace);
