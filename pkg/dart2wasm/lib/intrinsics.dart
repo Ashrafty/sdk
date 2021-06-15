@@ -45,7 +45,6 @@ class Intrinsifier {
         '-': {intType: (b) => b.i64_sub()},
         '*': {intType: (b) => b.i64_mul()},
         '~/': {intType: (b) => b.i64_div_s()},
-        '%': {intType: (b) => b.i64_rem_s()},
         '&': {intType: (b) => b.i64_and()},
         '|': {intType: (b) => b.i64_or()},
         '^': {intType: (b) => b.i64_xor()},

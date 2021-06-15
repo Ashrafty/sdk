@@ -23,8 +23,20 @@ class _BoxedInt implements int {
       : _BoxedDouble._truncDiv(toDouble(), unsafeCast<double>(other));
 
   num operator %(num other) => other is int
-      ? this % other
+      ? _modulo(this, other)
       : _BoxedDouble._modulo(toDouble(), unsafeCast<double>(other));
+
+  static int _modulo(int a, int b) {
+    int rem = a - (a ~/ b) * b;
+    if (rem < 0) {
+      if (b < 0) {
+        return rem - b;
+      } else {
+        return rem + b;
+      }
+    }
+    return rem;
+  }
 
   num remainder(num other) => other is int
       ? this - (this ~/ other) * other
