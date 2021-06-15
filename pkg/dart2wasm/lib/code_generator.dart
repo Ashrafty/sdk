@@ -1778,6 +1778,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     DartType type = node.type;
     if (type is! InterfaceType) {
       // TODO: Check
+      print("Not implemented: Type test with non-interface type $type"
+          " at ${node.location}");
       wrap(node.operand, translator.topInfo.nullableType);
       b.drop();
       b.i32_const(1);
