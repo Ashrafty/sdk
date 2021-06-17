@@ -366,7 +366,7 @@ class Instructions with SerializerMixin {
 
   bool _verifyCallRef() {
     if (!reachable) {
-      return _debugTrace(['call_ref'], reachableAfter: false);
+      return _debugTrace(const ['call_ref'], reachableAfter: false);
     }
     ValueType fun = _topOfStack;
     if (fun is RefType) {
@@ -375,7 +375,7 @@ class Instructions with SerializerMixin {
         var defType = heapType.def;
         if (defType is FunctionType) {
           return _verifyTypes([...defType.inputs, fun], defType.outputs,
-              trace: ['call_ref']);
+              trace: const ['call_ref']);
         }
       }
     }
@@ -705,6 +705,14 @@ class Instructions with SerializerMixin {
     writeByte(0xD5);
   }
 
+  void br_on_non_null(Label label) {
+    assert(_verifyBranchTypes(label, 1, [_topOfStack.withNullability(false)]));
+    assert(_verifyTypes(const [RefType.any()], const [],
+        trace: ['br_on_non_null', label]));
+    writeByte(0xD6);
+    _writeLabel(label);
+  }
+
   void struct_new_with_rtt(StructType structType) {
     assert(_verifyTypes(
         [...structType.fields.map((f) => f.type.unpacked), Rtt(structType)],
@@ -895,7 +903,7 @@ class Instructions with SerializerMixin {
   }
 
   void ref_test() {
-    assert(_verifyCast((_) => const [NumType.i32], trace: ['ref.test']));
+    assert(_verifyCast((_) => const [NumType.i32], trace: const ['ref.test']));
     writeBytes(const [0xFB, 0x40]);
   }
 
@@ -918,6 +926,15 @@ class Instructions with SerializerMixin {
     assert(_verifyBranchTypes(
         label, 1, [RefType.def(targetType, nullable: false)]));
     writeBytes(const [0xFB, 0x42]);
+    _writeLabel(label);
+  }
+
+  void br_on_cast_fail(Label label) {
+    assert(_verifyBranchTypes(label, 1, [_topOfStack]));
+    assert(_verifyCast(
+        (inputs) => [RefType.def((inputs[1] as Rtt).defType, nullable: false)],
+        trace: ['br_on_cast_fail', label]));
+    writeBytes(const [0xFB, 0x43]);
     _writeLabel(label);
   }
 
@@ -981,6 +998,33 @@ class Instructions with SerializerMixin {
         trace: ['br_on_i31', label]));
     assert(_verifyBranchTypes(label, 1, const [RefType.i31(nullable: false)]));
     writeBytes(const [0xFB, 0x62]);
+    _writeLabel(label);
+  }
+
+  void br_on_non_func(Label label) {
+    assert(_verifyBranchTypes(label, 1, [_topOfStack]));
+    assert(_verifyTypes(
+        const [RefType.any()], const [RefType.func(nullable: false)],
+        trace: ['br_on_non_func', label]));
+    writeBytes(const [0xFB, 0x63]);
+    _writeLabel(label);
+  }
+
+  void br_on_non_data(Label label) {
+    assert(_verifyBranchTypes(label, 1, [_topOfStack]));
+    assert(_verifyTypes(
+        const [RefType.any()], const [RefType.data(nullable: false)],
+        trace: ['br_on_non_data', label]));
+    writeBytes(const [0xFB, 0x64]);
+    _writeLabel(label);
+  }
+
+  void br_on_non_i31(Label label) {
+    assert(_verifyBranchTypes(label, 1, [_topOfStack]));
+    assert(_verifyTypes(
+        const [RefType.any()], const [RefType.i31(nullable: false)],
+        trace: ['br_on_non_i31', label]));
+    writeBytes(const [0xFB, 0x65]);
     _writeLabel(label);
   }
 

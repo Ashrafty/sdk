@@ -227,12 +227,9 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
       info = ConstantInfo(constant, global, function);
       constants.constantInfo[constant] = info;
     }
-    w.Label b1 = b.block([], [type]);
-    w.Label b2 = b.block([], []);
+    w.Label done = b.block([], [type]);
     b.global_get(info.global);
-    b.br_on_null(b2);
-    b.br(b1);
-    b.end();
+    b.br_on_non_null(done);
     b.call(info.function);
     b.end();
   }
