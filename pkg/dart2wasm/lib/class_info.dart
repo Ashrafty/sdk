@@ -26,6 +26,9 @@ class ClassInfo {
   late w.RefType nullableType = w.RefType.def(struct, nullable: true);
   late w.RefType nonNullableType = w.RefType.def(struct, nullable: false);
 
+  w.RefType typeWithNullability(bool nullable) =>
+      nullable ? nullableType : nonNullableType;
+
   ClassInfo(this.cls, this.classId, this.depth, this.struct, this.rtt) {
     implementedBy.add(this);
   }

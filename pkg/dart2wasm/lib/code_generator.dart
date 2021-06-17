@@ -289,6 +289,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         if (context.parent == null) break;
 
         b.struct_get(context.struct, context.parentFieldIndex);
+        if (options.localNullability) {
+          b.ref_as_non_null();
+        }
         context = context.parent!;
       }
       if (context.containsThis) {
@@ -479,8 +482,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
     if (node.initializer != null) {
       if (capture != null) {
+        w.ValueType expectedType = capture.written ? capture.type : local!.type;
         b.local_get(capture.context.currentLocal);
-        wrap(node.initializer!, capture.type);
+        wrap(node.initializer!, expectedType);
         if (!capture.written) {
           b.local_tee(local!);
         }
@@ -929,21 +933,24 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.ref_eq();
     } else {
       // Check operands for null, then call implementation
-      w.Local leftLocal = function.addLocal(translator.topInfo.nullableType);
-      w.Local rightLocal = function.addLocal(translator.topInfo.nullableType);
       bool leftNullable =
           node.left.getStaticType(typeContext).isPotentiallyNullable;
       bool rightNullable =
           node.right.getStaticType(typeContext).isPotentiallyNullable;
+      w.RefType leftType = translator.topInfo.typeWithNullability(leftNullable);
+      w.RefType rightType =
+          translator.topInfo.typeWithNullability(rightNullable);
+      w.Local leftLocal = function.addLocal(typeForLocal(leftType));
+      w.Local rightLocal = function.addLocal(typeForLocal(rightType));
       w.Label? operandNull;
       w.Label? done;
       if (leftNullable || rightNullable) {
         done = b.block([], [w.NumType.i32]);
         operandNull = b.block();
       }
-      wrap(node.left, translator.topInfo.nullableType);
+      wrap(node.left, leftLocal.type);
       b.local_set(leftLocal);
-      wrap(node.right, translator.topInfo.nullableType);
+      wrap(node.right, rightLocal.type);
       if (rightNullable) {
         b.local_tee(rightLocal);
         b.br_on_null(operandNull!);
@@ -956,14 +963,16 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         b.local_get(leftLocal);
         if (leftNullable) {
           b.br_on_null(operandNull!);
-        } else {
+        } else if (leftLocal.type.nullable) {
           b.ref_as_non_null();
         }
       }
 
       void right([_]) {
         b.local_get(rightLocal);
-        b.ref_as_non_null();
+        if (rightLocal.type.nullable) {
+          b.ref_as_non_null();
+        }
       }
 
       if (singleTarget != null) {
@@ -1649,7 +1658,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     b.rtt_canon(arrayType);
     b.array_new_default_with_rtt(arrayType);
     if (length > 0) {
-      w.Local arrayLocal = function.addLocal(typeForLocal(refType));
+      w.Local arrayLocal =
+          function.addLocal(typeForLocal(refType.withNullability(false)));
       b.local_set(arrayLocal);
       for (int i = 0; i < length; i++) {
         b.local_get(arrayLocal);

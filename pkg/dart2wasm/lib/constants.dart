@@ -217,10 +217,12 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
       w.FunctionType ftype = m.addFunctionType([], [type]);
       w.DefinedFunction function = m.addFunction(ftype);
       generator(function);
+      w.Local temp = function.addLocal(translator.typeForLocal(type));
       w.Instructions b2 = function.body;
+      b2.local_tee(temp);
       b2.global_set(global);
-      b2.global_get(global);
-      b2.ref_as_non_null();
+      b2.local_get(temp);
+      translator.convertType(function, temp.type, type);
       b2.end();
       info = ConstantInfo(constant, global, function);
       constants.constantInfo[constant] = info;
