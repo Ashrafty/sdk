@@ -188,7 +188,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       Class cls = member.enclosingClass!;
       ClassInfo info = translator.classInfo[cls]!;
       thisLocal = paramLocals[0];
-      w.RefType thisType = info.repr.nonNullableType;
+      w.RefType thisType = info.nonNullableType;
       if (translator.needsConversion(paramLocals[0].type, thisType)) {
         preciseThisLocal = function.addLocal(typeForLocal(thisType));
         b.local_get(paramLocals[0]);
