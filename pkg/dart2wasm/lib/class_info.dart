@@ -63,6 +63,8 @@ class ClassInfoCollector {
 
   ClassInfoCollector(this.translator) : m = translator.m;
 
+  TranslatorOptions get options => translator.options;
+
   static w.DefinedGlobal makeRtt(
       w.Module m, w.StructType struct, ClassInfo? superInfo) {
     int depth = superInfo != null ? superInfo.depth + 1 : 0;
@@ -93,7 +95,9 @@ class ClassInfoCollector {
       Class? superclass = cls.superclass;
       if (superclass == null) {
         ClassInfo superInfo = topInfo;
-        final w.StructType struct = m.addStructType(cls.name);
+        final w.StructType struct = options.nominalTypes
+            ? m.addStructType(cls.name, superType: superInfo.struct)
+            : m.addStructType(cls.name);
         final w.DefinedGlobal rtt = makeRtt(m, struct, superInfo);
         info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt)
           ..superInfo = superInfo;
@@ -136,14 +140,21 @@ class ClassInfoCollector {
         bool canReuseSuperStruct =
             typeParameterMatch.length == cls.typeParameters.length &&
                 cls.fields.where((f) => f.isInstanceMember).isEmpty;
-        w.StructType struct =
-            canReuseSuperStruct ? superInfo.struct : m.addStructType(cls.name);
+        w.StructType struct = options.nominalTypes
+            ? m.addStructType(cls.name, superType: superInfo.struct)
+            : canReuseSuperStruct
+                ? superInfo.struct
+                : m.addStructType(cls.name);
         final w.DefinedGlobal rtt = makeRtt(m, struct, superInfo);
         info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt)
           ..superInfo = superInfo
           ..typeParameterMatch = typeParameterMatch;
         for (Supertype interface in cls.implementedTypes) {
-          translator.classInfo[interface.classNode]!.implementedBy.add(info);
+          ClassInfo? interfaceInfo = translator.classInfo[interface.classNode];
+          while (interfaceInfo != null) {
+            interfaceInfo.implementedBy.add(info);
+            interfaceInfo = interfaceInfo.superInfo;
+          }
         }
       }
       translator.classes.add(info);

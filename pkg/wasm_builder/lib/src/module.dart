@@ -45,15 +45,18 @@ class Module with SerializerMixin {
     });
   }
 
-  StructType addStructType(String name, [Iterable<FieldType>? fields]) {
-    final type = StructType(name)..index = defTypes.length;
+  StructType addStructType(String name,
+      {Iterable<FieldType>? fields, StructType? superType}) {
+    final type = StructType(name, superType: superType)
+      ..index = defTypes.length;
     if (fields != null) type.fields.addAll(fields);
     defTypes.add(type);
     return type;
   }
 
-  ArrayType addArrayType(String name, [FieldType? elementType]) {
-    final type = ArrayType(name)..index = defTypes.length;
+  ArrayType addArrayType(String name,
+      {FieldType? elementType, ArrayType? superType}) {
+    final type = ArrayType(name, superType: superType)..index = defTypes.length;
     if (elementType != null) type.elementType = elementType;
     defTypes.add(type);
     return type;

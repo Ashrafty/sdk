@@ -141,6 +141,7 @@ final Map<String, void Function(TranslatorOptions, bool)> boolOptionMap = {
   "export-all": (o, value) => o.exportAll = value,
   "inlining": (o, value) => o.inlining = value,
   "local-nullability": (o, value) => o.localNullability = value,
+  "nominal-types": (o, value) => o.nominalTypes = value,
   "parameter-nullability": (o, value) => o.parameterNullability = value,
   "polymorphic-specialization": (o, value) =>
       o.polymorphicSpecialization = value,

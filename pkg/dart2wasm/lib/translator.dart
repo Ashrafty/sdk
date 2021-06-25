@@ -27,6 +27,7 @@ class TranslatorOptions {
   bool exportAll = false;
   bool inlining = false;
   bool localNullability = false;
+  bool nominalTypes = false;
   bool parameterNullability = true;
   bool polymorphicSpecialization = false;
   bool printKernel = false;
@@ -371,8 +372,9 @@ class Translator {
   w.StructType functionStructType(int parameterCount) {
     return functionTypeCache.putIfAbsent(parameterCount, () {
       ClassInfo info = classInfo[functionClass]!;
-      w.StructType struct =
-          m.addStructType("Function$parameterCount", info.struct.fields);
+      w.StructType struct = m.addStructType("Function$parameterCount",
+          fields: info.struct.fields,
+          superType: options.nominalTypes ? info.struct : null);
       struct.fields.add(w.FieldType(
           w.RefType.def(functionType(parameterCount), nullable: false),
           mutable: false));

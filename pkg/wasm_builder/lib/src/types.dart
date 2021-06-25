@@ -346,9 +346,14 @@ class DefHeapType extends HeapType {
 
 abstract class DefType implements Serializable {
   int? _index;
+  DefType? superType;
+
+  DefType({this.superType});
 
   int get index => _index ?? (throw "$runtimeType $this not added to module");
   set index(int i) => _index = i;
+
+  bool get hasSuperType => superType != null;
 
   bool isSubtypeOf(DefType other);
 }
@@ -357,7 +362,8 @@ class FunctionType extends DefType {
   final List<ValueType> inputs;
   final List<ValueType> outputs;
 
-  FunctionType(this.inputs, this.outputs);
+  FunctionType(this.inputs, this.outputs, {FunctionType? superType})
+      : super(superType: superType);
 
   @override
   bool isSubtypeOf(DefType other) {
@@ -377,9 +383,10 @@ class FunctionType extends DefType {
 
   @override
   void serialize(Serializer s) {
-    s.writeByte(0x60);
+    s.writeByte(hasSuperType ? 0x5D : 0x60);
     s.writeList(inputs);
     s.writeList(outputs);
+    if (hasSuperType) s.writeUnsigned(superType!.index);
   }
 
   @override
@@ -389,7 +396,7 @@ class FunctionType extends DefType {
 abstract class DataType extends DefType {
   final String name;
 
-  DataType(this.name);
+  DataType(this.name, {DefType? superType}) : super(superType: superType);
 
   @override
   String toString() => name;
@@ -398,11 +405,14 @@ abstract class DataType extends DefType {
 class StructType extends DataType {
   final List<FieldType> fields = [];
 
-  StructType(String name) : super(name);
+  StructType(String name, {StructType? superType})
+      : super(name, superType: superType);
 
   @override
   bool isSubtypeOf(DefType other) {
     if (other is! StructType) return false;
+    if (hasSuperType) return this == other || superType!.isSubtypeOf(other);
+    if (other.hasSuperType) return false;
     if (fields.length < other.fields.length) return false;
     for (int i = 0; i < other.fields.length; i++) {
       if (!fields[i].isSubtypeOf(other.fields[i])) return false;
@@ -412,26 +422,31 @@ class StructType extends DataType {
 
   @override
   void serialize(Serializer s) {
-    s.writeByte(0x5F);
+    s.writeByte(hasSuperType ? 0x5C : 0x5F);
     s.writeList(fields);
+    if (hasSuperType) s.writeUnsigned(superType!.index);
   }
 }
 
 class ArrayType extends DataType {
   late final FieldType elementType;
 
-  ArrayType(String name) : super(name);
+  ArrayType(String name, {ArrayType? superType})
+      : super(name, superType: superType);
 
   @override
   bool isSubtypeOf(DefType other) {
     if (other is! ArrayType) return false;
+    if (hasSuperType) return this == other || superType!.isSubtypeOf(other);
+    if (other.hasSuperType) return false;
     return elementType.isSubtypeOf(other.elementType);
   }
 
   @override
   void serialize(Serializer s) {
-    s.writeByte(0x5E);
+    s.writeByte(hasSuperType ? 0x5B : 0x5E);
     s.write(elementType);
+    if (hasSuperType) s.writeUnsigned(superType!.index);
   }
 }
 

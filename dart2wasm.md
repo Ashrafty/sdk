@@ -27,6 +27,7 @@ where *options* include:
 | `--`[`no-`]`export-all`                 | no      | Export all functions; otherwise, just export `main`.
 | `--`[`no-`]`inlining`                   | no      | Inline small functions.
 | `--`[`no-`]`local-nullability`          | no      | Use non-nullable types for non-nullable locals and temporaries.
+| `--`[`no-`]`nominal-types`              | no      | Emit experimental nominal types.
 | `--`[`no-`]`parameter-nullability`      | yes     | Use non-nullable types for non-nullable parameters and return values.
 | `--`[`no-`]`polymorphic-specialization` | no      | Do virtual calls by switching on the class ID instead of using `call_indirect`.
 | `--`[`no-`]`print-kernel`               | no      | Print IR for each function before compiling it.
