@@ -15,7 +15,7 @@ var module = new WebAssembly.Module(bytes);
 
 var writeFun = (typeof write !== 'undefined') ? write : process.stdout.write;
 function printChar(char) {
-    write(String.fromCharCode(char));
+    writeFun(String.fromCharCode(char));
 }
 
 // Instantiate Wasm module, importing some functions.
